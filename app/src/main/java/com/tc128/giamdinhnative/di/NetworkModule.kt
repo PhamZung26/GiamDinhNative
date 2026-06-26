@@ -42,11 +42,12 @@ object NetworkModule {
             })
             .addInterceptor { chain ->
                 val token = runBlocking { sessionManager.getToken() }
-                val request = if (token != null) {
-                    chain.request().newBuilder()
-                        .addHeader("Authorization", "Bearer $token")
-                        .build()
-                } else chain.request()
+                val request = chain.request().newBuilder()
+                    .apply { if (token != null) addHeader("Authorization", "Bearer $token") }
+                    // Đánh dấu request từ app native — backend dùng header này để phân biệt
+                    // với app Xamarin cũ (gọi cùng endpoint api/containerv2 nhưng không có header)
+                    .addHeader("X-Client-App", "GiamDinhNative")
+                    .build()
                 val response = chain.proceed(request)
                 // Server redirect về trang login (HTML) khi token hết hạn
                 // → chuyển thành 401 cho Retrofit xử lý, KHÔNG xóa token ở đây
