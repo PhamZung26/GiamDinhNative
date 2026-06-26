@@ -1,0 +1,2 @@
+-keep class com.tc128.giamdinhnative.data.model.** { *; }
+-keepattributes *Annotation*
