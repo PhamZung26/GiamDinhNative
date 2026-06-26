@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Foreground icon cho adaptive icon + splash screen — viewport 108dp theo chuẩn Android,
+     nội dung nằm trong safe zone 66dp giữa tâm để không bị cắt trên mọi launcher.
+     Dùng vector (không phải bitmap raw logo_tc128.png) vì logo gốc là banner ngang
+     (huy hiệu lệch trái + chữ kéo dài sang phải) — gravity="center" của bitmap drawable
+     sẽ crop đúng vào khoảng trống giữa banner, khiến icon hiển thị trắng/trống. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Thân container -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M27,40 L81,40 L81,72 L27,72 Z" />
+
+    <!-- Gân sóng dọc thân -->
+    <path
+        android:fillColor="#2E6FB8"
+        android:pathData="M37,40 L40,40 L40,72 L37,72 Z
+                           M50,40 L53,40 L53,72 L50,72 Z
+                           M63,40 L66,40 L66,72 L63,72 Z" />
+
+    <!-- Nóc container -->
+    <path
+        android:fillColor="#2E6FB8"
+        android:pathData="M27,40 L81,40 L81,45 L27,45 Z" />
+
+    <!-- Badge check khảo sát -->
+    <path
+        android:fillColor="#16A34A"
+        android:pathData="M70,58 A12,12 0 1 1 70,82 A12,12 0 1 1 70,58 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M64,70 L68,74 L77,65 L79,67 L68,78 L62,72 Z" />
+</vector>
