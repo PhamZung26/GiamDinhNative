@@ -134,7 +134,7 @@ data class LoginRequest(
 
 @Serializable
 data class UploadCleanDateTimeRequest(
-    @kotlinx.serialization.SerialName("ContainerId") val containerId: Int,
+    @kotlinx.serialization.SerialName("Id") val containerId: Int,
     @kotlinx.serialization.SerialName("DateTimeClean") val dateTimeClean: String,
 )
 

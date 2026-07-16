@@ -160,20 +160,10 @@ class PhotoUploadWorker @AssistedInject constructor(
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                 .addTag(WORK_NAME)
                 .build()
-            // REPLACE — bấm "Upload ngay" phải luôn chạy lại, không bị kẹt vì request cũ
-            // (KEEP sẽ no-op nếu còn 1 work cũ chưa kết thúc, ví dụ do mất mạng giữa lần upload trước)
-            WorkManager.getInstance(context).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, request)
-        }
-
-        fun schedulePeriodicUpload(context: Context) {
-            val request = PeriodicWorkRequestBuilder<PhotoUploadWorker>(15, TimeUnit.MINUTES)
-                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
-                .addTag(WORK_NAME)
-                .build()
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-                "${WORK_NAME}_periodic", ExistingPeriodicWorkPolicy.KEEP, request
-            )
+            // KEEP — khi đã có 1 worker "photo_upload" đang chạy/chờ, các lần bấm thêm là no-op
+            // (worker đang chạy vốn quét hết ảnh pending). Tránh sinh worker thứ hai chạy song song
+            // hoặc hủy worker đang gửi dở giữa chừng → chống upload trùng khi bấm nhiều lần.
+            WorkManager.getInstance(context).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.KEEP, request)
         }
     }
 }

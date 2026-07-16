@@ -3,9 +3,9 @@ package com.tc128.giamdinhnative.ui.screens.camera
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.tc128.giamdinhnative.data.repository.ContainerRepository
 import com.tc128.giamdinhnative.data.repository.PhotoRepository
 import com.tc128.giamdinhnative.worker.PhotoResizeWorker
+import com.tc128.giamdinhnative.worker.UpdateCleanDateWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.launch
@@ -14,7 +14,6 @@ import javax.inject.Inject
 @HiltViewModel
 class CameraViewModel @Inject constructor(
     private val photoRepository: PhotoRepository,
-    private val containerRepository: ContainerRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -43,14 +42,13 @@ class CameraViewModel @Inject constructor(
                 // để backend xác nhận vệ sinh xong gần như ngay sau khi chụp.
                 PhotoResizeWorker.enqueueImmediate(context)
 
-                // Port từ Xamarin ChupAnhVeSinh(): chụp ảnh vệ sinh xong, nếu container chưa có
-                // DateTimeClean thì cập nhật luôn ngày vệ sinh hiện tại
-                val numericId = containerId.toIntOrNull() ?: return@launch
-                runCatching {
-                    val container = containerRepository.getContainer(numericId)
-                    if (container.dateTimeClean.isNullOrBlank()) {
-                        containerRepository.uploadCleanDateTime(numericId)
-                    }
+                // Xác nhận vệ sinh (PUT UploadCleanDateTime) chạy qua WorkManager thay vì trực tiếp
+                // trong viewModelScope — nếu chạy ở đây, người dùng bấm Back ngay sau khi chụp sẽ
+                // huỷ NavBackStackEntry của màn Camera giữa lúc 2 API tuần tự đang chạy, khiến
+                // request không bao giờ hoàn thành. Xem UpdateCleanDateWorker.
+                val numericId = containerId.toIntOrNull()
+                if (numericId != null) {
+                    UpdateCleanDateWorker.enqueue(context, numericId)
                 }
             }
             // Ảnh giám định thường vẫn để periodic worker xử lý (15 phút / lần)

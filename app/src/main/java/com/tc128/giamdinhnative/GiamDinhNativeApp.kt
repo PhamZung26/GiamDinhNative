@@ -4,7 +4,6 @@ import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.tc128.giamdinhnative.worker.PhotoResizeWorker
-import com.tc128.giamdinhnative.worker.PhotoUploadWorker
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
@@ -21,8 +20,9 @@ class GiamDinhNativeApp : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
-        // Lên lịch upload định kỳ mỗi 15 phút ngay khi app khởi động
+        // Lên lịch resize định kỳ mỗi 15 phút — worker này luôn chain sang upload ở cuối,
+        // nên đây đã là đường upload định kỳ duy nhất. KHÔNG lịch riêng PhotoUploadWorker định kỳ
+        // để tránh 2 upload-worker chạy song song gây upload trùng (xem PhotoUploadWorker).
         PhotoResizeWorker.schedulePeriodicResize(this)
-        PhotoUploadWorker.schedulePeriodicUpload(this)
     }
 }
