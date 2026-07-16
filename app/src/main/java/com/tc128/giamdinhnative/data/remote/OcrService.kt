@@ -89,7 +89,11 @@ class OcrService @Inject constructor(
         val response = okHttpClient.newCall(request).execute()
         if (!response.isSuccessful) throw IOException("OCR lỗi: ${response.code}")
         val body = response.body?.string() ?: throw IOException("Không có kết quả OCR")
-        return json.decodeFromString(body)
+        return try {
+            json.decodeFromString(body)
+        } catch (e: Exception) {
+            throw IOException("Phản hồi OCR không hợp lệ: ${e.message}")
+        }
     }
 
     /**
@@ -121,9 +125,13 @@ class OcrService @Inject constructor(
         if (!response.isSuccessful) throw IOException("OCR lỗi: ${response.code}")
         val body = response.body?.string() ?: throw IOException("Không có kết quả OCR")
 
-        val parsedText = Json.parseToJsonElement(body).jsonObject["ParsedResults"]
-            ?.jsonArray?.firstOrNull()?.jsonObject?.get("ParsedText")
-            ?.jsonPrimitive?.content ?: ""
+        val parsedText = try {
+            Json.parseToJsonElement(body).jsonObject["ParsedResults"]
+                ?.jsonArray?.firstOrNull()?.jsonObject?.get("ParsedText")
+                ?.jsonPrimitive?.content ?: ""
+        } catch (e: Exception) {
+            ""
+        }
 
         // Giống Xamarin: chọn dòng dài nhất có chứa số và không chứa "/" hoặc "."
         val sealNo = parsedText.split("\n")

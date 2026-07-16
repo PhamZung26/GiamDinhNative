@@ -10,6 +10,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -31,7 +32,7 @@ class ImageResizer @Inject constructor(
         val sampleSize = calcSampleSize(bounds.outWidth, bounds.outHeight, maxDim)
         val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
         val sampled = resolver.openInputStream(imageUri)?.use { BitmapFactory.decodeStream(it, null, options) }
-            ?: error("Không đọc được ảnh từ URI")
+            ?: throw IOException("Không đọc được ảnh từ URI")
 
         return compressToBytes(sampled, rotation, maxDim)
     }
@@ -50,7 +51,7 @@ class ImageResizer @Inject constructor(
         val sampleSize = calcSampleSize(bounds.outWidth, bounds.outHeight, maxDim)
         val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
         val sampled = file.inputStream().use { BitmapFactory.decodeStream(it, null, options) }
-            ?: error("Không đọc được file: ${file.path}")
+            ?: throw IOException("Không đọc được file: ${file.path}")
 
         val bytes = compressToBytes(sampled, rotation, maxDim)
         FileOutputStream(file).use { it.write(bytes) }
@@ -68,7 +69,7 @@ class ImageResizer @Inject constructor(
         val sampleSize = calcSampleSize(bounds.outWidth, bounds.outHeight, maxDim)
         val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
         val sampled = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-            ?: error("Không decode được ảnh từ bytes")
+            ?: throw IOException("Không decode được ảnh từ bytes")
 
         return compressToBytes(sampled, rotationDegrees.toFloat(), maxDim)
     }

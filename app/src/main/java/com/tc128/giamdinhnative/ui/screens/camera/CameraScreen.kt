@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.media.MediaActionSound
 import android.util.Log
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -28,6 +29,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -108,6 +111,17 @@ fun CameraScreen(
 
     var processingCount by remember { mutableIntStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
+    var lastPhotoPath by remember { mutableStateOf<String?>(null) }
+    var thumbnailAnimTrigger by remember { mutableIntStateOf(0) }
+    val thumbnailScale by animateFloatAsState(
+        targetValue = if (thumbnailAnimTrigger % 2 == 1) 1.18f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "thumbScale"
+    )
+
+    // Tiếng tách khi chụp — giống camera gốc Samsung
+    val shutterSound = remember { MediaActionSound().also { it.load(MediaActionSound.SHUTTER_CLICK) } }
+    DisposableEffect(Unit) { onDispose { shutterSound.release() } }
 
     // Worker pipeline chạy suốt vòng đời màn hình trên IO thread
     LaunchedEffect(Unit) {
@@ -122,7 +136,7 @@ fun CameraScreen(
                     val tRead    = pending.t2BytesRead - pending.t1Captured
                     val tSave    = t4 - t3
                     val tTotal   = t4 - pending.t0Press
-                    val msg = "📸 Sensor: ${tSensor}ms | Read: ${tRead}ms | Save: ${tSave}ms | Total: ${tTotal}ms"
+                    val msg = "Đã lưu ảnh  (${tTotal}ms)"
 
                     withContext(Dispatchers.Main) {
                         processingCount = (processingCount - 1).coerceAtLeast(0)
@@ -212,12 +226,6 @@ fun CameraScreen(
             )
         },
         containerColor = Color.Black,
-        snackbarHost = {
-            SnackbarHost(
-                snackbarHostState,
-                modifier = Modifier.padding(bottom = 110.dp)
-            )
-        }
     ) { padding ->
         Box(
             modifier = Modifier
@@ -228,7 +236,9 @@ fun CameraScreen(
             AndroidView(
                 factory = { ctx ->
                     PreviewView(ctx).also { pv ->
-                        pv.implementationMode = PreviewView.ImplementationMode.PERFORMANCE
+                        // COMPATIBLE (TextureView) tương thích rộng hơn PERFORMANCE (SurfaceView)
+                        // — tránh màn hình đen trên Redmi/Snapdragon mid-range
+                        pv.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
                         pv.scaleType = PreviewView.ScaleType.FILL_CENTER
                         previewView = pv
                         bindCamera(ctx, lifecycleOwner, pv, flashMode,
@@ -272,6 +282,20 @@ fun CameraScreen(
                         }
                     }
             )
+
+            // ── Snackbar ở trên đầu ─────────────────────────────────────────
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 8.dp)
+            ) { data ->
+                Snackbar(
+                    snackbarData = data,
+                    containerColor = Color.Black.copy(alpha = 0.8f),
+                    contentColor = Color.White
+                )
+            }
 
             // ── Capture flash blink ─────────────────────────────────────────
             AnimatedVisibility(
@@ -434,7 +458,7 @@ fun CameraScreen(
                         val capture = imageCapture ?: return@CaptureButton
                         val t0 = System.currentTimeMillis()    // T0: bấm nút
                         isCapturing = true
-
+                        shutterSound.play(MediaActionSound.SHUTTER_CLICK)
                         showCaptureFlash = true
                         scope.launch { delay(200); showCaptureFlash = false }
 
@@ -458,6 +482,8 @@ fun CameraScreen(
                                     pipeline.trySend(
                                         PendingImage(bytes, rotation, t0, t1, t2) { finalPath, timingMsg ->
                                             onPhotoCaptured(finalPath)
+                                            lastPhotoPath = finalPath
+                                            thumbnailAnimTrigger++
                                             scope.launch {
                                                 snackbarHostState.showSnackbar(
                                                     message = timingMsg,
@@ -477,8 +503,28 @@ fun CameraScreen(
                     }
                 )
 
-                // Placeholder bên phải để cân bằng layout
-                Spacer(Modifier.size(52.dp))
+                // Thumbnail ảnh vừa chụp — góc phải, giống camera Samsung
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .scale(thumbnailScale)
+                        .clip(RoundedCornerShape(8.dp))
+                        .border(
+                            width = if (lastPhotoPath != null) 2.dp else 0.dp,
+                            color = Color.White,
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        .background(Color.White.copy(alpha = 0.1f))
+                ) {
+                    if (lastPhotoPath != null) {
+                        AsyncImage(
+                            model = java.io.File(lastPhotoPath!!),
+                            contentDescription = "Ảnh vừa chụp",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
             }
         }
     }
@@ -486,7 +532,7 @@ fun CameraScreen(
 
 // ── Camera binding ────────────────────────────────────────────────────────────
 
-@OptIn(ExperimentalZeroShutterLag::class, androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
+@OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
 private fun bindCamera(
     context: Context,
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
@@ -498,19 +544,6 @@ private fun bindCamera(
     val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
     cameraProviderFuture.addListener({
         val cameraProvider = cameraProviderFuture.get()
-
-        val preview = Preview.Builder().build()
-        preview.setSurfaceProvider(previewView.surfaceProvider)
-
-        // ZERO_SHUTTER_LAG: camera liên tục buffer frame sẵn sàng
-        // → không cần chờ AF/AE mỗi shot → sensor time giảm từ ~800ms xuống ~50ms
-        // Fallback về MINIMIZE_LATENCY nếu thiết bị không hỗ trợ (try-catch bên dưới)
-        @Suppress("DEPRECATION")
-        val imageCapture = ImageCapture.Builder()
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG)
-            .setFlashMode(flashMode)
-            .setJpegQuality(90)
-            .build()
 
         // 0.5x trên nhiều máy (đặc biệt Samsung) không truy cập được qua setZoomRatio < 1 của
         // camera logic chính — phải bind thẳng tới camera vật lý ultra-wide (xem CameraUtils.kt)
@@ -526,18 +559,28 @@ private fun bindCamera(
             CameraSelector.DEFAULT_BACK_CAMERA
         }
 
-        try {
-            cameraProvider.unbindAll()
-            val camera = cameraProvider.bindToLifecycle(
-                lifecycleOwner,
-                cameraSelector,
-                preview,
-                imageCapture
-            )
-            startContinuousAutoFocus(camera, previewView)
-            onCameraReady(camera, imageCapture)
-        } catch (e: Exception) {
-            Log.e(TAG, "bindCamera failed", e)
+        run {
+            val preview = Preview.Builder().build()
+                .also { it.setSurfaceProvider(previewView.surfaceProvider) }
+            // MINIMIZE_LATENCY: tổ hợp stream đơn giản, được HAL hỗ trợ phổ quát. Không dùng
+            // ZERO_SHUTTER_LAG vì trên HyperOS/Redmi tổ hợp Preview + ImageCapture(ZSL) có thể
+            // bind "thành công" nhưng HAL không đẩy frame → preview đen (không ném exception nên
+            // fallback theo exception không cứu được). Đánh đổi: nút chụp chậm hơn ~200-500ms.
+            val imageCapture = ImageCapture.Builder()
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                .setFlashMode(flashMode)
+                .setJpegQuality(90)
+                .build()
+            try {
+                cameraProvider.unbindAll()
+                val camera = cameraProvider.bindToLifecycle(
+                    lifecycleOwner, cameraSelector, preview, imageCapture
+                )
+                startContinuousAutoFocus(camera, previewView)
+                onCameraReady(camera, imageCapture)
+            } catch (e: Exception) {
+                Log.e(TAG, "bindCamera failed", e)
+            }
         }
     }, ContextCompat.getMainExecutor(context))
 }

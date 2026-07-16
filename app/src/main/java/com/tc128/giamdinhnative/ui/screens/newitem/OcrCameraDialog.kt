@@ -3,7 +3,6 @@ package com.tc128.giamdinhnative.ui.screens.newitem
 import android.content.Context
 import android.util.Size
 import androidx.camera.core.*
-import androidx.camera.core.ExperimentalZeroShutterLag
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -63,7 +62,7 @@ fun OcrCameraDialog(
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
     var isCapturing by remember { mutableStateOf(false) }
 
-    // ZSL không tương thích flash → bật flash sẽ rebind sang MINIMIZE_LATENCY
+    // Đổi flash mode sẽ rebind camera (LaunchedEffect bên dưới key theo flashMode)
     var flashMode by remember { mutableIntStateOf(ImageCapture.FLASH_MODE_OFF) }
     var zoomRatio by remember { mutableFloatStateOf(1f) }
 
@@ -126,7 +125,7 @@ fun OcrCameraDialog(
             AndroidView(
                 factory = { ctx ->
                     PreviewView(ctx).also { pv ->
-                        pv.implementationMode = PreviewView.ImplementationMode.PERFORMANCE
+                        pv.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
                         pv.scaleType = PreviewView.ScaleType.FILL_CENTER
                         previewView = pv
                     }
@@ -322,7 +321,7 @@ fun OcrCameraDialog(
     }
 }
 
-@OptIn(ExperimentalZeroShutterLag::class, androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
+@OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
 private fun bindOcrCamera(
     context: Context,
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
@@ -337,7 +336,10 @@ private fun bindOcrCamera(
         val preview = Preview.Builder().build()
             .also { it.setSurfaceProvider(previewView.surfaceProvider) }
 
-        val captureBuilder = ImageCapture.Builder()
+        // MINIMIZE_LATENCY: tổ hợp stream đơn giản, HAL hỗ trợ phổ quát. Không dùng
+        // ZERO_SHUTTER_LAG vì trên HyperOS/Redmi tổ hợp Preview + ImageCapture(ZSL) có thể bind
+        // "thành công" nhưng HAL không đẩy frame → preview đen (không ném exception).
+        val capture = ImageCapture.Builder()
             .setResolutionSelector(
                 ResolutionSelector.Builder()
                     .setResolutionStrategy(
@@ -348,18 +350,9 @@ private fun bindOcrCamera(
                     )
                     .build()
             )
-
-        // ZSL không tương thích flash → chỉ dùng ZSL khi flash OFF
-        if (flashMode == ImageCapture.FLASH_MODE_OFF) {
-            captureBuilder
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG)
-                .setFlashMode(ImageCapture.FLASH_MODE_OFF)
-        } else {
-            captureBuilder
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                .setFlashMode(flashMode)
-        }
-        val capture = captureBuilder.build()
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .setFlashMode(flashMode)
+            .build()
 
         // 0.5x trên nhiều máy (đặc biệt Samsung) không truy cập được qua setZoomRatio < 1 của
         // camera logic chính — phải bind thẳng tới camera vật lý ultra-wide (xem CameraUtils.kt)
@@ -377,20 +370,13 @@ private fun bindOcrCamera(
 
         try {
             provider.unbindAll()
-            val cam = provider.bindToLifecycle(
-                lifecycleOwner,
-                cameraSelector,
-                preview, capture
-            )
+            val cam = provider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, capture)
             onReady(cam, capture)
 
             val center = previewView.meteringPointFactory.createPoint(0.5f, 0.5f)
             val action = FocusMeteringAction.Builder(
-                center,
-                FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
-            )
-                .setAutoCancelDuration(2, TimeUnit.SECONDS)
-                .build()
+                center, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
+            ).setAutoCancelDuration(2, TimeUnit.SECONDS).build()
             cam.cameraControl.startFocusAndMetering(action)
         } catch (_: Exception) {}
     }, ContextCompat.getMainExecutor(context))
