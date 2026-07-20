@@ -38,6 +38,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -222,10 +223,16 @@ fun OcrCameraDialog(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 OcrZoomButton(icon = Icons.Default.Add, contentDescription = "Zoom in") {
-                    camera?.let { cam ->
-                        val newZoom = (zoomRatio + 0.5f).coerceAtMost(maxZoomRatio)
-                        cam.cameraControl.setZoomRatio(newZoom)
-                        zoomRatio = newZoom
+                    if (useUltrawide) {
+                        // Từ 0.5x bấm + → rời ultra-wide, quay lại camera chính ở 1x
+                        targetZoomAfterRebind = 1f
+                        useUltrawide = false
+                    } else {
+                        camera?.let { cam ->
+                            val newZoom = (zoomRatio + 0.5f).coerceAtMost(maxZoomRatio)
+                            cam.cameraControl.setZoomRatio(newZoom)
+                            zoomRatio = newZoom
+                        }
                     }
                 }
                 Box(
@@ -236,10 +243,15 @@ fun OcrCameraDialog(
                     Text("%.1fx".format(zoomRatio), color = Color.White, fontSize = 11.sp)
                 }
                 OcrZoomButton(icon = Icons.Default.Remove, contentDescription = "Zoom out") {
-                    camera?.let { cam ->
-                        val newZoom = (zoomRatio - 0.5f).coerceAtLeast(minZoomRatio)
-                        cam.cameraControl.setZoomRatio(newZoom)
-                        zoomRatio = newZoom
+                    if (!useUltrawide && ultrawideCameraId != null && zoomRatio - 0.5f < 1f) {
+                        // Sắp xuống dưới 1x mà máy có ultra-wide vật lý → chuyển sang 0.5x thật
+                        useUltrawide = true
+                    } else {
+                        camera?.let { cam ->
+                            val newZoom = (zoomRatio - 0.5f).coerceAtLeast(minZoomRatio)
+                            cam.cameraControl.setZoomRatio(newZoom)
+                            zoomRatio = newZoom
+                        }
                     }
                 }
             }

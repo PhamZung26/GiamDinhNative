@@ -23,8 +23,8 @@ android {
         applicationId = "com.tc128.giamdinhnative"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.2.5"
+        versionCode = 12
+        versionName = "1.2.9"
     }
 
     signingConfigs {

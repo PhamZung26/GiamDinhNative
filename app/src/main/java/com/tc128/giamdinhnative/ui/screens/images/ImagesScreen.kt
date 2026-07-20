@@ -3,38 +3,29 @@ package com.tc128.giamdinhnative.ui.screens.images
 import android.Manifest
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudUpload
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -43,6 +34,7 @@ import coil.compose.AsyncImage
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
+import com.tc128.giamdinhnative.ui.components.ZoomableImagePagerDialog
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
 @Composable
@@ -54,10 +46,17 @@ fun ImagesScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val cameraPermission = rememberPermissionState(Manifest.permission.CAMERA)
-    var zoomTarget by remember { mutableStateOf<Any?>(null) }
+    var zoomIndex by remember { mutableStateOf<Int?>(null) }
 
-    zoomTarget?.let { model ->
-        ZoomableImageDialog(model = model, onDismiss = { zoomTarget = null })
+    // Danh sách ảnh gộp (local trước, server sau) — dùng cho next/pre trong màn xem ảnh toàn màn hình
+    val allModels: List<Any> = remember(uiState.photos, uiState.serverUrls) {
+        uiState.photos.mapNotNull { photo ->
+            (photo.pathLocal?.let { java.io.File(it) }) ?: photo.pathServer
+        } + uiState.serverUrls
+    }
+
+    zoomIndex?.let { index ->
+        ZoomableImagePagerDialog(models = allModels, initialIndex = index, onDismiss = { zoomIndex = null })
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -138,15 +137,16 @@ fun ImagesScreen(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        items(uiState.photos, key = { "local_${it.id}" }) { photo ->
+                        itemsIndexed(uiState.photos, key = { _, it -> "local_${it.id}" }) { index, photo ->
                             PhotoGridItem(
                                 photo = photo,
                                 onDelete = { viewModel.deletePhoto(photo) },
-                                onZoom = { zoomTarget = it }
+                                onZoom = { zoomIndex = index }
                             )
                         }
-                        items(uiState.serverUrls, key = { "server_$it" }) { url ->
-                            ServerPhotoGridItem(url = url, onZoom = { zoomTarget = url })
+                        val localCount = uiState.photos.size
+                        itemsIndexed(uiState.serverUrls, key = { _, it -> "server_$it" }) { index, url ->
+                            ServerPhotoGridItem(url = url, onZoom = { zoomIndex = localCount + index })
                         }
                         item { Spacer(Modifier.height(80.dp)) }
                     }
@@ -193,7 +193,7 @@ private fun ServerPhotoGridItem(url: String, onZoom: () -> Unit) {
 private fun PhotoGridItem(
     photo: com.tc128.giamdinhnative.data.local.PhotoEntity,
     onDelete: () -> Unit,
-    onZoom: (Any) -> Unit
+    onZoom: () -> Unit
 ) {
     var showDelete by remember { mutableStateOf(false) }
     var showError by remember { mutableStateOf(false) }
@@ -215,7 +215,7 @@ private fun PhotoGridItem(
             .aspectRatio(1f)
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .then(if (imageModel != null) Modifier.clickable { onZoom(imageModel) } else Modifier)
+            .then(if (imageModel != null) Modifier.clickable(onClick = onZoom) else Modifier)
     ) {
         if (imageModel != null) {
             AsyncImage(
@@ -252,65 +252,6 @@ private fun PhotoGridItem(
                 },
                 modifier = Modifier.size(13.dp)
             )
-        }
-    }
-}
-
-// Xem ảnh to toàn màn hình, hỗ trợ pinch-zoom + pan, double-tap để zoom nhanh
-@Composable
-private fun ZoomableImageDialog(model: Any, onDismiss: () -> Unit) {
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
-
-    fun resetZoom() {
-        scale = 1f
-        offset = Offset.Zero
-    }
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
-                .pointerInput(Unit) {
-                    detectTransformGestures { _, pan, zoom, _ ->
-                        val newScale = (scale * zoom).coerceIn(1f, 6f)
-                        scale = newScale
-                        offset = if (newScale <= 1f) Offset.Zero else offset + pan
-                    }
-                }
-                .pointerInput(Unit) {
-                    detectTapGestures(onDoubleTap = {
-                        if (scale > 1f) resetZoom() else { scale = 3f }
-                    })
-                }
-        ) {
-            AsyncImage(
-                model = model,
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer(
-                        scaleX = scale,
-                        scaleY = scale,
-                        translationX = offset.x,
-                        translationY = offset.y
-                    )
-            )
-
-            IconButton(
-                onClick = onDismiss,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(8.dp)
-                    .background(Color.Black.copy(alpha = 0.45f), CircleShape)
-            ) {
-                Icon(Icons.Default.Close, contentDescription = "Đóng", tint = Color.White)
-            }
         }
     }
 }

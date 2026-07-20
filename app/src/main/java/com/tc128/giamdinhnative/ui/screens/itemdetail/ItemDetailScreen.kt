@@ -35,6 +35,7 @@ import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import com.tc128.giamdinhnative.data.model.StatusOfContainer
 import com.tc128.giamdinhnative.ui.screens.items.statusColor
+import com.tc128.giamdinhnative.ui.components.autoBringIntoViewOnFocus
 import com.tc128.giamdinhnative.ui.screens.newitem.OcrCameraDialog
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
@@ -72,11 +73,12 @@ fun ItemDetailScreen(
     var swipeStartX by remember { mutableFloatStateOf(0f) }
 
     // Reload mỗi khi quay lại màn hình (vd: sau khi chụp ảnh/sửa hư hỏng), nhưng không reload
-    // khi đang isEditing để không mất các thay đổi chưa lưu của người dùng
+    // khi đang có thay đổi chưa lưu (isDirty) để không mất dữ liệu người dùng vừa nhập — set bởi
+    // MỌI thao tác sửa trường (Seal, Tình trạng, Grade, ...), không chỉ khi mở khoá Size/Opt
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(containerId, lifecycleOwner) {
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            if (!uiState.isEditing) viewModel.load(containerId)
+            if (!uiState.isDirty) viewModel.load(containerId)
         }
     }
 
@@ -247,6 +249,10 @@ fun ItemDetailScreen(
                 .background(MaterialTheme.colorScheme.background)
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
+                // enableEdgeToEdge() làm adjustResize (manifest) không còn tự đẩy nội dung lên khi
+                // bàn phím mở — phải tự chừa chỗ bằng imePadding(), kết hợp verticalScroll để
+                // trường đang nhập cuộn lên khỏi vùng bị bàn phím che
+                .imePadding()
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
@@ -258,7 +264,7 @@ fun ItemDetailScreen(
                 label = { Text("Số container") },
                 textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold),
                 shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().autoBringIntoViewOnFocus()
             )
 
             // ── Size | Opt ───────────────────────────────────────────────────
@@ -299,43 +305,43 @@ fun ItemDetailScreen(
                 onSelect = viewModel::onCleanMethodChange
             )
 
-            // ── Year | Seal ──────────────────────────────────────────────────
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = uiState.yearManufacture,
-                    onValueChange = viewModel::onYearChange,
-                    readOnly = false,
-                    label = { Text("Năm SX") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.weight(1f)
-                )
-                OutlinedTextField(
-                    value = uiState.seal,
-                    onValueChange = viewModel::onSealChange,
-                    readOnly = false,
-                    label = { Text("Seal") },
-                    singleLine = true,
-                    trailingIcon = {
-                        if (uiState.isScanningSeal) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                        } else {
-                            IconButton(onClick = {
-                                if (cameraPermission.status.isGranted) {
-                                    showSealScanDialog = true
-                                } else {
-                                    cameraPermission.launchPermissionRequest()
-                                }
-                            }) {
-                                Icon(Icons.Default.CameraAlt, contentDescription = "Quét số seal")
+            // ── Năm SX ─────────────────────────────────────────────────────
+            OutlinedTextField(
+                value = uiState.yearManufacture,
+                onValueChange = viewModel::onYearChange,
+                readOnly = false,
+                label = { Text("Năm SX") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(0.4f).autoBringIntoViewOnFocus()
+            )
+
+            // ── Seal — chiếm trọn hàng để hiển thị đủ ký tự, số seal thường dài 8-11 ký tự ──
+            OutlinedTextField(
+                value = uiState.seal,
+                onValueChange = viewModel::onSealChange,
+                readOnly = false,
+                label = { Text("Seal") },
+                singleLine = true,
+                trailingIcon = {
+                    if (uiState.isScanningSeal) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        IconButton(onClick = {
+                            if (cameraPermission.status.isGranted) {
+                                showSealScanDialog = true
+                            } else {
+                                cameraPermission.launchPermissionRequest()
                             }
+                        }) {
+                            Icon(Icons.Default.CameraAlt, contentDescription = "Quét số seal")
                         }
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.weight(1f)
-                )
-            }
+                    }
+                },
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().autoBringIntoViewOnFocus()
+            )
 
             // ── Nhập nhanh (FastFill) — chọn 1 mục sẽ tự nối CodeName vào Tình trạng ─────────
             FastFillDropdown(
@@ -356,7 +362,7 @@ fun ItemDetailScreen(
                 },
                 minLines = 3,
                 shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().autoBringIntoViewOnFocus()
             )
 
             // ── Remark ───────────────────────────────────────────────────────
@@ -367,7 +373,7 @@ fun ItemDetailScreen(
                 placeholder = { Text("Những dữ liệu này không hiển thị trên EIR") },
                 minLines = 2,
                 shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().autoBringIntoViewOnFocus()
             )
 
             // ── IsDamage | IsNeedClean ───────────────────────────────────────

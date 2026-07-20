@@ -8,6 +8,7 @@ import com.tc128.giamdinhnative.data.remote.toUserMessage
 import com.tc128.giamdinhnative.data.repository.ContainerRepository
 import com.tc128.giamdinhnative.data.repository.LookupRepository
 import com.tc128.giamdinhnative.data.repository.PhotoRepository
+import com.tc128.giamdinhnative.session.SessionManager
 import com.tc128.giamdinhnative.util.ImageResizer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -49,7 +50,8 @@ class NewItemViewModel @Inject constructor(
     private val lookupRepository: LookupRepository,
     private val ocrService: OcrService,
     private val imageResizer: ImageResizer,
-    private val photoRepository: PhotoRepository
+    private val photoRepository: PhotoRepository,
+    private val sessionManager: SessionManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(NewItemUiState())
@@ -58,6 +60,10 @@ class NewItemViewModel @Inject constructor(
     // Không load ở đây — NewItemScreen gọi loadLookups() qua repeatOnLifecycle(RESUMED),
     // tự fire ngay lần đầu vào màn hình nên load ở init{} nữa sẽ bị trùng (chớp 2 lần)
 
+    // Chỉ tự điền Size/Operator từ phiên trước MỘT LẦN lúc mới vào màn hình — loadLookups() còn
+    // được gọi lại mỗi khi resume, không được ghi đè lựa chọn người dùng đang chọn dở giữa chừng
+    private var hasPrefilledLastSelection = false
+
     fun loadLookups() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingLookups = true) }
@@ -65,6 +71,24 @@ class NewItemViewModel @Inject constructor(
                 val sizes = lookupRepository.getSizes()
                 val opts = lookupRepository.getOpts()
                 _uiState.update { it.copy(isLoadingLookups = false, sizes = sizes, opts = opts) }
+
+                if (!hasPrefilledLastSelection) {
+                    hasPrefilledLastSelection = true
+                    val lastSizeId = sessionManager.getLastSizeId()
+                    val lastOptId = sessionManager.getLastOptId()
+                    val lastSizeName = lastSizeId?.let { id -> sizes.find { it.first == id }?.second }
+                    val lastOptName = lastOptId?.let { id -> opts.find { it.first == id }?.second }
+                    if (lastSizeName != null || lastOptName != null) {
+                        _uiState.update {
+                            it.copy(
+                                selectedSizeId = lastSizeName?.let { lastSizeId } ?: it.selectedSizeId,
+                                selectedSizeName = lastSizeName ?: it.selectedSizeName,
+                                selectedOptId = lastOptName?.let { lastOptId } ?: it.selectedOptId,
+                                selectedOptName = lastOptName ?: it.selectedOptName
+                            )
+                        }
+                    }
+                }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoadingLookups = false, error = e.message) }
             }
@@ -82,11 +106,13 @@ class NewItemViewModel @Inject constructor(
     fun onSizeChange(id: Int) {
         val name = _uiState.value.sizes.find { it.first == id }?.second ?: ""
         _uiState.update { it.copy(selectedSizeId = id, selectedSizeName = name) }
+        viewModelScope.launch { sessionManager.saveLastSizeId(id) }
     }
 
     fun onOptChange(id: Int) {
         val name = _uiState.value.opts.find { it.first == id }?.second ?: ""
         _uiState.update { it.copy(selectedOptId = id, selectedOptName = name) }
+        viewModelScope.launch { sessionManager.saveLastOptId(id) }
     }
 
     fun dismissOcrTiming() = _uiState.update { it.copy(ocrTimingMessage = null) }

@@ -49,6 +49,10 @@ data class ItemDetailUiState(
     val isNeedClean: Boolean = false,
 
     val isEditing: Boolean = false,
+    // true ngay khi bất kỳ trường nào bị sửa (không chỉ khi mở khoá Size/Opt/Số cont) — dùng để
+    // chặn reload-khi-resume ghi đè mất dữ liệu đang nhập dở (vd: sửa Seal rồi đi chụp ảnh rồi
+    // quay lại). Khác với isEditing (chỉ điều khiển khoá Size/Opt/Số cont).
+    val isDirty: Boolean = false,
     val isLoading: Boolean = true, // true ngay từ đầu — tránh chớp khung "rỗng" trước khi load() chạy xong
     val isSaving: Boolean = false,
     val isScanningSeal: Boolean = false,
@@ -120,6 +124,7 @@ class ItemDetailViewModel @Inject constructor(
                     remark = container?.remark ?: "",
                     isDamage = container?.isDamage ?: false,
                     isNeedClean = container?.isDirty ?: false,
+                    isDirty = false,
                     error = if (isAuth401) null
                             else containerResult.exceptionOrNull()?.message,
                     requiresLogin = isAuth401
@@ -133,24 +138,24 @@ class ItemDetailViewModel @Inject constructor(
     fun onGradeChange(id: Int) {
         val name = _uiState.value.grades.find { it.first == id }?.second ?: ""
         val isDamage = name.uppercase().trimStart().startsWith("D")
-        _uiState.update { it.copy(selectedGradeId = id, selectedGrade = name, isDamage = isDamage) }
+        _uiState.update { it.copy(selectedGradeId = id, selectedGrade = name, isDamage = isDamage, isDirty = true) }
     }
 
     fun onSizeChange(id: Int) {
         val name = _uiState.value.sizes.find { it.first == id }?.second
-        _uiState.update { it.copy(selectedSizeId = id, selectedSize = name) }
+        _uiState.update { it.copy(selectedSizeId = id, selectedSize = name, isDirty = true) }
     }
 
     fun onOptChange(id: Int) {
         val name = _uiState.value.opts.find { it.first == id }?.second
-        _uiState.update { it.copy(selectedOptId = id, selectedOpt = name) }
+        _uiState.update { it.copy(selectedOptId = id, selectedOpt = name, isDirty = true) }
     }
 
     fun onCleanMethodChange(id: Int) {
         val name = _uiState.value.cleanMethods.find { it.first == id }?.second ?: ""
         val upper = name.uppercase()
         val isNeedClean = upper.contains("NƯỚC") || upper.contains("CÔNG")
-        _uiState.update { it.copy(selectedCleanMethodId = id, selectedCleanMethod = name, isNeedClean = isNeedClean) }
+        _uiState.update { it.copy(selectedCleanMethodId = id, selectedCleanMethod = name, isNeedClean = isNeedClean, isDirty = true) }
     }
 
     // Port từ Xamarin NhapNhanhSelectedCommand: chọn 1 mục "Nhập nhanh" tự nối CodeName vào Tình trạng,
@@ -158,7 +163,7 @@ class ItemDetailViewModel @Inject constructor(
     fun onFastFillSelected(fastFill: FastFill) {
         _uiState.update { state ->
             val newTinhTrang = (state.tinhTrang + ", " + fastFill.codeName).replace("- ,", "-")
-            state.copy(tinhTrang = newTinhTrang)
+            state.copy(tinhTrang = newTinhTrang, isDirty = true)
         }
         chuyenGradeBocTem()
     }
@@ -179,14 +184,14 @@ class ItemDetailViewModel @Inject constructor(
     }
 
     fun onContainerNumberChange(v: String) = _uiState.update {
-        it.copy(containerNumber = v.uppercase().filter(Char::isLetterOrDigit).take(11))
+        it.copy(containerNumber = v.uppercase().filter(Char::isLetterOrDigit).take(11), isDirty = true)
     }
-    fun onSealChange(v: String) = _uiState.update { it.copy(seal = v) }
-    fun onYearChange(v: String) = _uiState.update { it.copy(yearManufacture = v.filter(Char::isDigit).take(4)) }
-    fun onTinhTrangChange(v: String) = _uiState.update { it.copy(tinhTrang = v) }
-    fun onRemarkChange(v: String) = _uiState.update { it.copy(remark = v) }
-    fun onIsDamageChange(v: Boolean) = _uiState.update { it.copy(isDamage = v) }
-    fun onIsNeedCleanChange(v: Boolean) = _uiState.update { it.copy(isNeedClean = v) }
+    fun onSealChange(v: String) = _uiState.update { it.copy(seal = v, isDirty = true) }
+    fun onYearChange(v: String) = _uiState.update { it.copy(yearManufacture = v.filter(Char::isDigit).take(4), isDirty = true) }
+    fun onTinhTrangChange(v: String) = _uiState.update { it.copy(tinhTrang = v, isDirty = true) }
+    fun onRemarkChange(v: String) = _uiState.update { it.copy(remark = v, isDirty = true) }
+    fun onIsDamageChange(v: Boolean) = _uiState.update { it.copy(isDamage = v, isDirty = true) }
+    fun onIsNeedCleanChange(v: Boolean) = _uiState.update { it.copy(isNeedClean = v, isDirty = true) }
     fun dismissSaveMessage() = _uiState.update { it.copy(saveMessage = null) }
     fun dismissError() = _uiState.update { it.copy(error = null) }
 
@@ -215,6 +220,7 @@ class ItemDetailViewModel @Inject constructor(
                     it.copy(
                         isScanningSeal = false,
                         seal = result.sealNo.ifBlank { it.seal },
+                        isDirty = it.isDirty || result.sealNo.isNotBlank(),
                         saveMessage = if (result.sealNo.isNotBlank()) "Đã nhận dạng được số chì: ${result.sealNo}" else "Không nhận dạng được số chì"
                     )
                 }
@@ -247,7 +253,7 @@ class ItemDetailViewModel @Inject constructor(
                     isDamage = state.isDamage,
                     isDirty = state.isNeedClean
                 )
-                _uiState.update { it.copy(isSaving = false, saveMessage = "Lưu dữ liệu thành công") }
+                _uiState.update { it.copy(isSaving = false, isDirty = false, saveMessage = "Lưu dữ liệu thành công") }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isSaving = false, error = e.toUserMessage()) }
             }

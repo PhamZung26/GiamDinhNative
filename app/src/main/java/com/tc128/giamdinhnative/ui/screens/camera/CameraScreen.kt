@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
+import com.tc128.giamdinhnative.ui.components.ZoomableImagePagerDialog
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -112,6 +113,9 @@ fun CameraScreen(
     var processingCount by remember { mutableIntStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
     var lastPhotoPath by remember { mutableStateOf<String?>(null) }
+    // Toàn bộ ảnh đã chụp trong phiên này — chạm thumbnail mở lại xem, next/pre giữa các ảnh
+    val capturedPaths = remember { mutableStateListOf<String>() }
+    var showImageViewer by remember { mutableStateOf(false) }
     var thumbnailAnimTrigger by remember { mutableIntStateOf(0) }
     val thumbnailScale by animateFloatAsState(
         targetValue = if (thumbnailAnimTrigger % 2 == 1) 1.18f else 1f,
@@ -152,6 +156,9 @@ fun CameraScreen(
         }
     }
 
+    // ĐÃ THỬ dùng torch (đèn pin bật liên tục) thay cho FLASH_MODE_ON để tránh pha pre-flash đo
+    // sáng — nhanh hơn nhưng ảnh bị cháy sáng vì bỏ qua bước AE precapture chuẩn của CameraX
+    // (thứ đang cho kết quả đúng sáng ở chế độ AUTO). Quay lại dùng FLASH_MODE_ON nguyên bản.
     LaunchedEffect(flashMode) { imageCapture?.flashMode = flashMode }
 
     // Rebind sang camera vật lý ultra-wide khi bật 0.5x, rebind lại camera chính khi tắt
@@ -345,10 +352,16 @@ fun CameraScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 ZoomButton(icon = Icons.Default.Add, contentDescription = "Zoom in") {
-                    camera?.let { cam ->
-                        val newZoom = (zoomRatio + 0.5f).coerceAtMost(maxZoomRatio)
-                        cam.cameraControl.setZoomRatio(newZoom)
-                        zoomRatio = newZoom
+                    if (useUltrawide) {
+                        // Từ 0.5x bấm + → rời ultra-wide, quay lại camera chính ở 1x
+                        targetZoomAfterRebind = 1f
+                        useUltrawide = false
+                    } else {
+                        camera?.let { cam ->
+                            val newZoom = (zoomRatio + 0.5f).coerceAtMost(maxZoomRatio)
+                            cam.cameraControl.setZoomRatio(newZoom)
+                            zoomRatio = newZoom
+                        }
                     }
                 }
                 Box(
@@ -359,10 +372,16 @@ fun CameraScreen(
                     Text("%.1fx".format(zoomRatio), color = Color.White, fontSize = 11.sp)
                 }
                 ZoomButton(icon = Icons.Default.Remove, contentDescription = "Zoom out") {
-                    camera?.let { cam ->
-                        val newZoom = (zoomRatio - 0.5f).coerceAtLeast(minZoomRatio)
-                        cam.cameraControl.setZoomRatio(newZoom)
-                        zoomRatio = newZoom
+                    if (!useUltrawide && ultrawideCameraId != null && zoomRatio - 0.5f < 1f) {
+                        // Sắp xuống dưới 1x mà máy có ultra-wide vật lý → chuyển sang 0.5x thật
+                        // (setZoomRatio < 1 trên camera chính không hoạt động trên nhiều máy)
+                        useUltrawide = true
+                    } else {
+                        camera?.let { cam ->
+                            val newZoom = (zoomRatio - 0.5f).coerceAtLeast(minZoomRatio)
+                            cam.cameraControl.setZoomRatio(newZoom)
+                            zoomRatio = newZoom
+                        }
                     }
                 }
             }
@@ -483,6 +502,7 @@ fun CameraScreen(
                                         PendingImage(bytes, rotation, t0, t1, t2) { finalPath, timingMsg ->
                                             onPhotoCaptured(finalPath)
                                             lastPhotoPath = finalPath
+                                            capturedPaths.add(finalPath)
                                             thumbnailAnimTrigger++
                                             scope.launch {
                                                 snackbarHostState.showSnackbar(
@@ -503,7 +523,8 @@ fun CameraScreen(
                     }
                 )
 
-                // Thumbnail ảnh vừa chụp — góc phải, giống camera Samsung
+                // Thumbnail ảnh vừa chụp — góc phải, giống camera Samsung. Chạm để xem lại toàn màn
+                // hình, có zoom + next/pre giữa các ảnh đã chụp trong phiên này.
                 Box(
                     modifier = Modifier
                         .size(52.dp)
@@ -515,6 +536,10 @@ fun CameraScreen(
                             shape = RoundedCornerShape(8.dp)
                         )
                         .background(Color.White.copy(alpha = 0.1f))
+                        .then(
+                            if (lastPhotoPath != null) Modifier.clickable { showImageViewer = true }
+                            else Modifier
+                        )
                 ) {
                     if (lastPhotoPath != null) {
                         AsyncImage(
@@ -525,6 +550,14 @@ fun CameraScreen(
                         )
                     }
                 }
+            }
+
+            if (showImageViewer && capturedPaths.isNotEmpty()) {
+                ZoomableImagePagerDialog(
+                    models = capturedPaths.map { java.io.File(it) },
+                    initialIndex = capturedPaths.lastIndex,
+                    onDismiss = { showImageViewer = false }
+                )
             }
         }
     }

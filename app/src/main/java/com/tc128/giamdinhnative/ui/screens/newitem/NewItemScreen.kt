@@ -30,6 +30,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
+import com.tc128.giamdinhnative.ui.components.autoBringIntoViewOnFocus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -131,6 +132,9 @@ fun NewItemScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
+                // enableEdgeToEdge() làm adjustResize (manifest) không còn tự đẩy nội dung lên khi
+                // bàn phím mở — phải tự chừa chỗ bằng imePadding()
+                .imePadding()
                 .padding(horizontal = 16.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
@@ -163,7 +167,7 @@ fun NewItemScreen(
                 ),
                 textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
                 shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().autoBringIntoViewOnFocus()
             )
 
             // ── Lookups ────────────────────────────────────────────────────
