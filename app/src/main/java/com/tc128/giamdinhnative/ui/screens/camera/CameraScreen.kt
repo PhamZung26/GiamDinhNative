@@ -36,6 +36,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -87,7 +88,17 @@ fun CameraScreen(
     // Zoom muốn áp dụng cho camera chính sau khi rebind xong (chỉ cần khi đang chuyển từ ultra-wide về)
     var targetZoomAfterRebind by remember { mutableFloatStateOf(1f) }
 
+    // Flash nhớ lựa chọn gần nhất (persist qua SessionManager)
+    val camSettings: CameraSettingsViewModel = hiltViewModel()
+    val savedFlash by camSettings.flashMode.collectAsState()
     var flashMode by remember { mutableIntStateOf(ImageCapture.FLASH_MODE_AUTO) }
+    var flashInitialized by remember { mutableStateOf(false) }
+    LaunchedEffect(savedFlash) {
+        if (!flashInitialized && savedFlash != CameraSettingsViewModel.UNLOADED) {
+            flashMode = savedFlash
+            flashInitialized = true
+        }
+    }
     var isCapturing by remember { mutableStateOf(false) }
     var showFocusRing by remember { mutableStateOf(false) }
     var focusOffset by remember { mutableStateOf(Offset.Zero) }
@@ -100,11 +111,14 @@ fun CameraScreen(
     // zoom 0.5x sẽ không bao giờ hiện ra dù máy có hỗ trợ.
     var minZoomRatio by remember { mutableFloatStateOf(1f) }
     var maxZoomRatio by remember { mutableFloatStateOf(1f) }
+    // Latch: đã thấy máy hỗ trợ zoom < 1 thì giữ luôn nút 0.5x, không cho biến mất khi rebind reset
+    var everWide by remember { mutableStateOf(false) }
     DisposableEffect(camera) {
         val zoomState = camera?.cameraInfo?.zoomState
         val observer = androidx.lifecycle.Observer<androidx.camera.core.ZoomState> { zs ->
             minZoomRatio = zs.minZoomRatio
             maxZoomRatio = zs.maxZoomRatio
+            if (zs.minZoomRatio < 0.95f) everWide = true
         }
         zoomState?.observeForever(observer)
         onDispose { zoomState?.removeObserver(observer) }
@@ -161,6 +175,26 @@ fun CameraScreen(
     // (thứ đang cho kết quả đúng sáng ở chế độ AUTO). Quay lại dùng FLASH_MODE_ON nguyên bản.
     LaunchedEffect(flashMode) { imageCapture?.flashMode = flashMode }
 
+    // Tự xoay ảnh theo hướng cầm máy thật (cảm biến) — giống camera hệ điều hành. Cập nhật
+    // targetRotation để image.imageInfo.rotationDegrees đúng hướng, ảnh lưu/gửi không bị nghiêng.
+    DisposableEffect(imageCapture) {
+        val ic = imageCapture
+        val listener = object : android.view.OrientationEventListener(context) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+                val rotation = when (orientation) {
+                    in 45..134 -> android.view.Surface.ROTATION_270
+                    in 135..224 -> android.view.Surface.ROTATION_180
+                    in 225..314 -> android.view.Surface.ROTATION_90
+                    else -> android.view.Surface.ROTATION_0
+                }
+                ic?.targetRotation = rotation
+            }
+        }
+        if (ic != null && listener.canDetectOrientation()) listener.enable()
+        onDispose { listener.disable() }
+    }
+
     // Rebind sang camera vật lý ultra-wide khi bật 0.5x, rebind lại camera chính khi tắt
     // (bỏ qua lần đầu — factory của AndroidView đã tự bind camera chính rồi)
     LaunchedEffect(useUltrawide, previewView) {
@@ -213,11 +247,13 @@ fun CameraScreen(
                 ),
                 actions = {
                     IconButton(onClick = {
-                        flashMode = when (flashMode) {
+                        val next = when (flashMode) {
                             ImageCapture.FLASH_MODE_AUTO -> ImageCapture.FLASH_MODE_ON
                             ImageCapture.FLASH_MODE_ON  -> ImageCapture.FLASH_MODE_OFF
                             else                        -> ImageCapture.FLASH_MODE_AUTO
                         }
+                        flashMode = next
+                        camSettings.setFlashMode(next)
                     }) {
                         Icon(
                             imageVector = when (flashMode) {
@@ -409,10 +445,11 @@ fun CameraScreen(
                 }
             }
 
-            // ── Zoom presets: 0.5x (bind camera vật lý ultra-wide nếu máy có), 1x, 2x, 3x ──
+            // ── Zoom presets: 0.5x (ultra-wide vật lý hoặc fallback digital nếu minZoom<1), 1x, 2x, 3x ──
             run {
+                val showWide = ultrawideCameraId != null || everWide
                 val presets = buildList {
-                    if (ultrawideCameraId != null) add(0.5f)
+                    if (showWide) add(0.5f)
                     add(1f)
                     if (maxZoomRatio >= 2f) add(2f)
                     if (maxZoomRatio >= 3f) add(3f)
@@ -421,17 +458,24 @@ fun CameraScreen(
                     Row(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
+                            .navigationBarsPadding()
                             .padding(bottom = 112.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         presets.forEach { preset ->
                             ZoomPresetChip(
                                 value = preset,
-                                selected = if (preset == 0.5f) useUltrawide
+                                selected = if (preset == 0.5f) (useUltrawide || (!useUltrawide && zoomRatio < 0.95f))
                                            else !useUltrawide && kotlin.math.abs(zoomRatio - preset) < 0.05f,
                                 onClick = {
                                     if (preset == 0.5f) {
-                                        useUltrawide = true
+                                        if (ultrawideCameraId != null) {
+                                            useUltrawide = true
+                                        } else {
+                                            val liveMin = camera?.cameraInfo?.zoomState?.value?.minZoomRatio ?: minZoomRatio
+                                            camera?.cameraControl?.setZoomRatio(liveMin)
+                                            zoomRatio = liveMin
+                                        }
                                     } else if (useUltrawide) {
                                         targetZoomAfterRebind = preset
                                         useUltrawide = false
@@ -446,12 +490,13 @@ fun CameraScreen(
                 }
             }
 
-            // ── Bottom controls: Back | Capture ────────────────────────────
+            // ── Bottom controls: Back | Capture | Thumbnail ────────────────
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .padding(bottom = 40.dp, start = 32.dp, end = 32.dp),
+                    .navigationBarsPadding()
+                    .padding(bottom = 24.dp, start = 32.dp, end = 32.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {

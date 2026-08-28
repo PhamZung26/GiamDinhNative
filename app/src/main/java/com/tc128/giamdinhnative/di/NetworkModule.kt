@@ -35,10 +35,21 @@ object NetworkModule {
     @Singleton
     fun provideOkHttpClient(sessionManager: SessionManager): OkHttpClient {
         return OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            // NAS qua Tailscale/hopto chậm nhưng KHÔNG để quá lâu: timeout 120s khiến 1 ảnh treo tới
+            // 120s, 1 lô 10 ảnh treo ~20 phút → worker giữ KEEP-lock lâu (nút Upload thành no-op) rồi
+            // bị cắt. 60s đủ cho ảnh ~1MB tới NAS chậm, mà phát hiện treo nhanh hơn để worker retry sớm.
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .callTimeout(90, TimeUnit.SECONDS)
+            // Tắt tự-retry của OkHttp: với POST upload (không idempotent), nếu kết nối rớt sau khi
+            // server đã nhận ảnh, OkHttp retry sẽ gửi lại → tạo bản trùng ở backend. Tắt để mỗi ảnh
+            // chỉ gửi đúng 1 lần cho mỗi lần worker chạy.
+            .retryOnConnectionFailure(false)
             .addInterceptor(HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.BODY
+                // HEADERS thay vì BODY: BODY log toàn bộ bytes ảnh mỗi lần upload → chậm + tốn RAM,
+                // góp phần làm upload lâu. HEADERS đủ để chẩn đoán mà không đọc cả ảnh vào log.
+                level = HttpLoggingInterceptor.Level.HEADERS
             })
             .addInterceptor { chain ->
                 val token = runBlocking { sessionManager.getToken() }

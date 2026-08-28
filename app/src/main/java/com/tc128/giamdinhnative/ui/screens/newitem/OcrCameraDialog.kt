@@ -29,14 +29,22 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.tc128.giamdinhnative.ui.screens.camera.CameraSettingsViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -63,20 +71,54 @@ fun OcrCameraDialog(
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
     var isCapturing by remember { mutableStateOf(false) }
 
-    // Đổi flash mode sẽ rebind camera (LaunchedEffect bên dưới key theo flashMode)
+    // Flash nhớ lựa chọn gần nhất (persist qua SessionManager). Chờ nạp xong (>=0) mới áp vào.
+    val camSettings: CameraSettingsViewModel = hiltViewModel()
+    val savedFlash by camSettings.flashMode.collectAsState()
     var flashMode by remember { mutableIntStateOf(ImageCapture.FLASH_MODE_OFF) }
+    var flashInitialized by remember { mutableStateOf(false) }
+    LaunchedEffect(savedFlash) {
+        if (!flashInitialized && savedFlash != CameraSettingsViewModel.UNLOADED) {
+            flashMode = savedFlash
+            flashInitialized = true
+        }
+    }
     var zoomRatio by remember { mutableFloatStateOf(1f) }
+
+    // Tự xoay ảnh theo hướng cầm máy thật (cảm biến) — giống camera hệ điều hành. Nếu không có,
+    // số container chụp khi cầm ngang sẽ bị xoay → OCR không đọc được. Cập nhật targetRotation của
+    // ImageCapture để image.imageInfo.rotationDegrees phản ánh đúng hướng, ImageResizer xoay theo.
+    DisposableEffect(imageCapture) {
+        val ic = imageCapture
+        val listener = object : android.view.OrientationEventListener(context) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+                val rotation = when (orientation) {
+                    in 45..134 -> android.view.Surface.ROTATION_270
+                    in 135..224 -> android.view.Surface.ROTATION_180
+                    in 225..314 -> android.view.Surface.ROTATION_90
+                    else -> android.view.Surface.ROTATION_0
+                }
+                ic?.targetRotation = rotation
+            }
+        }
+        if (ic != null && listener.canDetectOrientation()) listener.enable()
+        onDispose { listener.disable() }
+    }
 
     // zoomState là LiveData — đọc .value 1 lần ngay lúc bind xong thường ra giá trị placeholder
     // (min=max=1f) vì CameraX cần 1 nhịp nữa mới xác định xong range zoom thật (vd 0.5x/0.6x
     // ultra-wide). Phải observe để cập nhật khi giá trị thật về, không thì nút 0.5x không hiện.
     var minZoomRatio by remember { mutableFloatStateOf(1f) }
     var maxZoomRatio by remember { mutableFloatStateOf(1f) }
+    // Latch: một khi ĐÃ thấy máy hỗ trợ zoom < 1 (0.5x/0.6x thật), giữ luôn — không cho nút 0.5x
+    // biến mất khi zoomState bị reset về placeholder (min=1) lúc rebind camera.
+    var everWide by remember { mutableStateOf(false) }
     DisposableEffect(camera) {
         val zoomState = camera?.cameraInfo?.zoomState
         val observer = androidx.lifecycle.Observer<androidx.camera.core.ZoomState> { zs ->
             minZoomRatio = zs.minZoomRatio
             maxZoomRatio = zs.maxZoomRatio
+            if (zs.minZoomRatio < 0.95f) everWide = true
         }
         zoomState?.observeForever(observer)
         onDispose { zoomState?.removeObserver(observer) }
@@ -91,8 +133,9 @@ fun OcrCameraDialog(
     var useUltrawide by remember { mutableStateOf(false) }
     var targetZoomAfterRebind by remember { mutableFloatStateOf(1f) }
 
-    // Rebind mỗi khi đổi flash mode hoặc bật/tắt ultra-wide (cần preview đã sẵn sàng)
-    LaunchedEffect(flashMode, previewView, useUltrawide) {
+    // Rebind CHỈ khi bật/tắt ultra-wide (không rebind khi đổi flash — sẽ làm reset zoomState khiến
+    // nút 0.5x nhấp nháy/biến mất). Flash áp trực tiếp qua imageCapture.flashMode bên dưới.
+    LaunchedEffect(previewView, useUltrawide) {
         val pv = previewView ?: return@LaunchedEffect
         bindOcrCamera(
             context, lifecycleOwner, pv, flashMode,
@@ -109,6 +152,9 @@ fun OcrCameraDialog(
         }
     }
 
+    // Đổi flash KHÔNG rebind — chỉ cập nhật flashMode của imageCapture hiện tại
+    LaunchedEffect(flashMode, imageCapture) { imageCapture?.flashMode = flashMode }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(
@@ -117,6 +163,24 @@ fun OcrCameraDialog(
             dismissOnClickOutside = false
         )
     ) {
+        // WindowInsets của Compose trong Dialog thường trả 0 → navigationBarsPadding() vô tác dụng,
+        // nút chụp bị đè lên thanh điều hướng. Đọc chiều cao nav bar THỦ CÔNG qua insets listener của
+        // decorView để trừ chính xác (chạy đúng cả 3-nút lẫn cử chỉ).
+        val dialogView = LocalView.current
+        val density = LocalDensity.current
+        var navBarBottom by remember { mutableStateOf(0.dp) }
+        DisposableEffect(dialogView) {
+            (dialogView.parent as? DialogWindowProvider)?.window?.let {
+                WindowCompat.setDecorFitsSystemWindows(it, false)
+            }
+            androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(dialogView) { _, insets ->
+                val b = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+                navBarBottom = with(density) { b.toDp() }
+                insets
+            }
+            androidx.core.view.ViewCompat.requestApplyInsets(dialogView)
+            onDispose { androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(dialogView, null) }
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -150,7 +214,8 @@ fun OcrCameraDialog(
             Surface(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 56.dp, start = 24.dp, end = 24.dp),
+                    .statusBarsPadding()
+                    .padding(top = 16.dp, start = 24.dp, end = 24.dp),
                 color = Color.Black.copy(alpha = 0.55f),
                 shape = RoundedCornerShape(10.dp)
             ) {
@@ -167,6 +232,7 @@ fun OcrCameraDialog(
                 onClick = onDismiss,
                 modifier = Modifier
                     .align(Alignment.TopStart)
+                    .statusBarsPadding()
                     .padding(8.dp)
             ) {
                 Icon(
@@ -176,17 +242,20 @@ fun OcrCameraDialog(
                 )
             }
 
-            // Nút flash (góc trên phải)
+            // Nút flash (góc trên phải) — lưu lựa chọn để lần sau mở lại giữ nguyên
             IconButton(
                 onClick = {
-                    flashMode = when (flashMode) {
+                    val next = when (flashMode) {
                         ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_ON
                         ImageCapture.FLASH_MODE_ON  -> ImageCapture.FLASH_MODE_AUTO
                         else                        -> ImageCapture.FLASH_MODE_OFF
                     }
+                    flashMode = next
+                    camSettings.setFlashMode(next)
                 },
                 modifier = Modifier
                     .align(Alignment.TopEnd)
+                    .statusBarsPadding()
                     .padding(8.dp)
             ) {
                 Icon(
@@ -256,10 +325,13 @@ fun OcrCameraDialog(
                 }
             }
 
-            // Zoom presets: 0.5x (bind camera vật lý ultra-wide nếu máy có), 1x, 2x, 3x
+            // Zoom presets: 0.5x, 1x, 2x, 3x. 0.5x có 2 nguồn: (a) camera vật lý ultra-wide, hoặc
+            // (b) camera chính expose minZoomRatio < 1 (Redmi/HyperOS gộp ultra-wide vào zoom logic,
+            // vd 0.6x). Dùng `everWide` (đã latch) để nút không biến mất khi zoomState reset lúc rebind.
             run {
+                val showWide = ultrawideCameraId != null || everWide
                 val presets = buildList {
-                    if (ultrawideCameraId != null) add(0.5f)
+                    if (showWide) add(0.5f)
                     add(1f)
                     if (maxZoomRatio >= 2f) add(2f)
                     if (maxZoomRatio >= 3f) add(3f)
@@ -268,17 +340,24 @@ fun OcrCameraDialog(
                     Row(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .padding(bottom = 120.dp),
+                            .padding(bottom = navBarBottom + 96.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         presets.forEach { preset ->
                             OcrZoomPresetChip(
                                 value = preset,
-                                selected = if (preset == 0.5f) useUltrawide
+                                selected = if (preset == 0.5f) (useUltrawide || (!useUltrawide && zoomRatio < 0.95f))
                                            else !useUltrawide && kotlin.math.abs(zoomRatio - preset) < 0.05f,
                                 onClick = {
                                     if (preset == 0.5f) {
-                                        useUltrawide = true
+                                        if (ultrawideCameraId != null) {
+                                            useUltrawide = true
+                                        } else {
+                                            // Đọc min thật từ camera lúc bấm (state có thể đang stale)
+                                            val liveMin = camera?.cameraInfo?.zoomState?.value?.minZoomRatio ?: minZoomRatio
+                                            camera?.cameraControl?.setZoomRatio(liveMin)
+                                            zoomRatio = liveMin
+                                        }
                                     } else if (useUltrawide) {
                                         targetZoomAfterRebind = preset
                                         useUltrawide = false
@@ -293,11 +372,11 @@ fun OcrCameraDialog(
                 }
             }
 
-            // Nút chụp (giữa dưới)
+            // Nút chụp (giữa dưới) — trừ chiều cao nav bar (đọc thủ công) để không bị đè lên nút home
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 48.dp)
+                    .padding(bottom = navBarBottom + 24.dp)
             ) {
                 OcrCaptureButton(
                     isCapturing = isCapturing,

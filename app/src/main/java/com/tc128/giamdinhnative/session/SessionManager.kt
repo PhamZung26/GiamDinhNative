@@ -26,6 +26,8 @@ class SessionManager @Inject constructor(
     // người dùng không phải chọn lại (đa số container tạo liên tiếp cùng Size/Operator)
     private val lastSizeIdKey = intPreferencesKey("last_size_id")
     private val lastOptIdKey = intPreferencesKey("last_opt_id")
+    // Trạng thái flash chọn lần gần nhất (ImageCapture.FLASH_MODE_*), nhớ giữa các lần mở camera
+    private val lastFlashModeKey = intPreferencesKey("last_flash_mode")
 
     val token: Flow<String?> = context.dataStore.data.map { it[tokenKey] }
     val username: Flow<String?> = context.dataStore.data.map { it[usernameKey] }
@@ -49,6 +51,15 @@ class SessionManager @Inject constructor(
 
     suspend fun saveLastOptId(id: Int) {
         context.dataStore.edit { it[lastOptIdKey] = id }
+    }
+
+    // Mặc định lần đầu = FLASH_MODE_AUTO (0)
+    suspend fun getLastFlashMode(): Int =
+        context.dataStore.data.map { it[lastFlashModeKey] }.firstOrNull()
+            ?: androidx.camera.core.ImageCapture.FLASH_MODE_AUTO
+
+    suspend fun saveLastFlashMode(mode: Int) {
+        context.dataStore.edit { it[lastFlashModeKey] = mode }
     }
 
     suspend fun clear() {

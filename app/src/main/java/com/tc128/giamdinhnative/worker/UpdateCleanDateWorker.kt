@@ -33,12 +33,25 @@ class UpdateCleanDateWorker @AssistedInject constructor(
         if (containerId <= 0) return Result.failure()
 
         return try {
-            // Port từ Xamarin ChupAnhVeSinh(): chỉ set DateTimeClean nếu container chưa có
+            // Cần lấy ContainerNo vì backend bind body vào object Container và bắt buộc field này
+            // (thiếu → 400). getContainer trả 200 ổn định. Sau đó PUT set DateTimeClean cho container.
             val container = containerRepository.getContainer(containerId)
-            if (container.dateTimeClean.isNullOrBlank()) {
-                containerRepository.uploadCleanDateTime(containerId)
+            val resp = containerRepository.uploadCleanDateTime(containerId, container.containerNumber)
+            if (resp.isSuccessful) {
+                Log.d(TAG, "Clean date OK for container $containerId: HTTP ${resp.code()}")
+                resp.body()?.close()
+                Result.success()
+            } else {
+                // Log lý do lỗi từ backend (vd 400 "Container không tồn trên hệ thống") để chẩn đoán
+                val err = runCatching { resp.errorBody()?.string() }.getOrNull()
+                Log.e(TAG, "Clean date FAILED for container $containerId: HTTP ${resp.code()} body=$err")
+                // 4xx (trừ 408/429) là lỗi phía dữ liệu/định dạng — retry cũng vô ích, đừng lặp mãi.
+                if (resp.code() in 400..499 && resp.code() != 408 && resp.code() != 429) {
+                    Result.failure()
+                } else {
+                    Result.retry()
+                }
             }
-            Result.success()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to update clean date for container $containerId", e)
             Result.retry()

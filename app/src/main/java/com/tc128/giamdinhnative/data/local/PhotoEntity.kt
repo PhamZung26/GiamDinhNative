@@ -44,12 +44,20 @@ interface PhotoDao {
     suspend fun getByItemEor(itemEorId: Int): List<PhotoEntity>
 
     // Lấy ảnh chưa resize, có file local
-    @Query("SELECT * FROM photos WHERE isResized = 0 AND pathLocal IS NOT NULL ORDER BY createdAt ASC LIMIT 20")
+    @Query("SELECT * FROM photos WHERE isResized = 0 AND pathLocal IS NOT NULL ORDER BY createdAt ASC LIMIT 1000")
     suspend fun getPendingResize(): List<PhotoEntity>
 
     // Chỉ upload ảnh đã resize xong
-    @Query("SELECT * FROM photos WHERE isUploaded = 0 AND isResized = 1 AND pathLocal IS NOT NULL ORDER BY createdAt ASC LIMIT 10")
+    @Query("SELECT * FROM photos WHERE isUploaded = 0 AND isResized = 1 AND pathLocal IS NOT NULL ORDER BY createdAt ASC LIMIT 1000")
     suspend fun getPendingUpload(): List<PhotoEntity>
+
+    // Tổng số ảnh còn chờ upload (đã resize) — dùng cho ngưỡng foreground + tiến độ notification
+    @Query("SELECT COUNT(*) FROM photos WHERE isUploaded = 0 AND isResized = 1 AND pathLocal IS NOT NULL")
+    suspend fun countPendingUpload(): Int
+
+    // Tổng số ảnh còn chờ resize — ngưỡng foreground cho PhotoResizeWorker
+    @Query("SELECT COUNT(*) FROM photos WHERE isResized = 0 AND pathLocal IS NOT NULL")
+    suspend fun countPendingResize(): Int
 
     // Toàn bộ ảnh chưa upload (không giới hạn số lượng, không cần đã resize) — dùng cho màn hình xem danh sách chờ
     @Query("SELECT * FROM photos WHERE isUploaded = 0 ORDER BY createdAt DESC")

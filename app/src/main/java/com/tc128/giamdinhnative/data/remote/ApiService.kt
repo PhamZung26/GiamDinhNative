@@ -41,8 +41,10 @@ interface ApiService {
         @Query("isFilterJustClean") isFilterJustClean: Boolean? = null
     ): List<Container>
 
+    // Trả Response (không phải Unit) để: (1) 204 No Content không ném NPE, (2) đọc được mã HTTP +
+    // errorBody khi backend trả 400 → biết chính xác lý do thất bại.
     @PUT("api/containerv2/UploadCleanDateTime")
-    suspend fun uploadCleanDateTime(@Body body: UploadCleanDateTimeRequest)
+    suspend fun uploadCleanDateTime(@Body body: UploadCleanDateTimeRequest): retrofit2.Response<okhttp3.ResponseBody>
 
     @GET("api/grade")
     suspend fun getGrades(): List<Grade>
@@ -135,6 +137,9 @@ data class LoginRequest(
 @Serializable
 data class UploadCleanDateTimeRequest(
     @kotlinx.serialization.SerialName("Id") val containerId: Int,
+    // Backend bind body vào object Container và BẮT BUỘC ContainerNo (ASP.NET model validation) —
+    // thiếu field này bị 400 trước khi action chạy. Phải gửi kèm số container thật.
+    @kotlinx.serialization.SerialName("ContainerNo") val containerNo: String,
     @kotlinx.serialization.SerialName("DateTimeClean") val dateTimeClean: String,
 )
 

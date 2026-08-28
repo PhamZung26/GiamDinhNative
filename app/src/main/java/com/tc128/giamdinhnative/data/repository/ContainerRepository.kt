@@ -83,11 +83,18 @@ class ContainerRepository @Inject constructor(
     ): List<Container> =
         apiService.getDirtyContainersNotYetClean(containerNo, cleanMethodId, isFilterJustClean)
 
-    suspend fun uploadCleanDateTime(containerId: Int) =
-        apiService.uploadCleanDateTime(
+    suspend fun uploadCleanDateTime(containerId: Int, containerNo: String): retrofit2.Response<okhttp3.ResponseBody> {
+        val dateTimeClean = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+        android.util.Log.d(
+            "UpdateCleanDate",
+            "PUT api/containerv2/UploadCleanDateTime body={\"Id\":$containerId,\"ContainerNo\":\"$containerNo\",\"DateTimeClean\":\"$dateTimeClean\"}"
+        )
+        return apiService.uploadCleanDateTime(
             UploadCleanDateTimeRequest(
                 containerId = containerId,
-                dateTimeClean = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                containerNo = containerNo,
+                dateTimeClean = dateTimeClean
             )
         )
+    }
 }

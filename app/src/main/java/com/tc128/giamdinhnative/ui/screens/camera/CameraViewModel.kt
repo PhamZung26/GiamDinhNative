@@ -2,19 +2,21 @@ package com.tc128.giamdinhnative.ui.screens.camera
 
 import android.content.Context
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.tc128.giamdinhnative.data.repository.PhotoRepository
+import com.tc128.giamdinhnative.di.ApplicationScope
 import com.tc128.giamdinhnative.worker.PhotoResizeWorker
 import com.tc128.giamdinhnative.worker.UpdateCleanDateWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
 class CameraViewModel @Inject constructor(
     private val photoRepository: PhotoRepository,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 
     // photoStatus truyền rõ từ màn gọi (DM→PreRepair, AV/VS→Available). Nếu không truyền,
@@ -26,7 +28,18 @@ class CameraViewModel @Inject constructor(
         photoStatus: String? = null,
         updateCleanDate: Boolean = false
     ) {
-        viewModelScope.launch {
+        // Lên lịch xác nhận vệ sinh NGAY LẬP TỨC (đồng bộ, không phụ thuộc saveLocal hay lifecycle).
+        // enqueueUniqueWork không phải suspend — phải gọi trước mọi điểm suspend, nếu để sau
+        // saveLocal (có bước copy ảnh vào gallery, chậm) mà user bấm Back ngay thì scope bị hủy
+        // giữa chừng, worker không bao giờ được lên lịch → server không nhận vệ sinh (lỗi cũ).
+        if (updateCleanDate) {
+            containerId.toIntOrNull()?.let { UpdateCleanDateWorker.enqueue(context, it) }
+        }
+
+        // Lưu ảnh + lên lịch resize/upload chạy ở application scope (KHÔNG phải viewModelScope) để
+        // không bị hủy khi màn Camera rời back stack — bảo đảm ảnh luôn được lưu và đẩy đi dù user
+        // thoát ngay sau khi chụp.
+        appScope.launch {
             val status = photoStatus ?: if (itemEorId != null) "PostRepair" else "Available"
             photoRepository.saveLocal(
                 containerNumber = containerId,
@@ -34,25 +47,10 @@ class CameraViewModel @Inject constructor(
                 filePath = filePath,
                 status = status
             )
-            if (updateCleanDate) {
-                // Ảnh vệ sinh: backend xử lý xác nhận vệ sinh dựa trên ảnh đã nhận được, nên cần
-                // upload ngay (không chờ periodic worker 15 phút như ảnh giám định thường).
-                // Khớp Xamarin: timer nền upload toàn bộ ảnh chưa gửi chạy mỗi 1 phút — không có
-                // luồng "upload tức thì" riêng cho ảnh vệ sinh, nhưng app này cần phản hồi nhanh hơn
-                // để backend xác nhận vệ sinh xong gần như ngay sau khi chụp.
-                PhotoResizeWorker.enqueueImmediate(context)
-
-                // Xác nhận vệ sinh (PUT UploadCleanDateTime) chạy qua WorkManager thay vì trực tiếp
-                // trong viewModelScope — nếu chạy ở đây, người dùng bấm Back ngay sau khi chụp sẽ
-                // huỷ NavBackStackEntry của màn Camera giữa lúc 2 API tuần tự đang chạy, khiến
-                // request không bao giờ hoàn thành. Xem UpdateCleanDateWorker.
-                val numericId = containerId.toIntOrNull()
-                if (numericId != null) {
-                    UpdateCleanDateWorker.enqueue(context, numericId)
-                }
-            }
-            // Ảnh giám định thường vẫn để periodic worker xử lý (15 phút / lần)
-            // không enqueue ngay để tránh cạnh tranh tài nguyên với camera
+            // Đẩy resize→upload ngay cho MỌI ảnh (không chỉ vệ sinh) — trước đây ảnh giám định thường
+            // phải chờ periodic 15', gộp với batch nhỏ khiến "chỉ upload được vài chục ảnh". Worker
+            // dùng unique-work KEEP nên gọi nhiều lần cũng chỉ 1 luồng chạy, không gây trùng.
+            PhotoResizeWorker.enqueueImmediate(context)
         }
     }
 }

@@ -8,8 +8,10 @@ import com.tc128.giamdinhnative.data.local.PhotoDao
 import com.tc128.giamdinhnative.data.remote.ApiService
 import com.tc128.giamdinhnative.data.remote.OcrService
 import com.tc128.giamdinhnative.session.SessionManager
+import com.tc128.giamdinhnative.util.UploadNotifications
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.delay
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -35,92 +37,141 @@ class PhotoUploadWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
-        Log.d(TAG, "doWork() started")
+        Log.d(TAG, "doWork() started (attempt=$runAttemptCount)")
         val token = sessionManager.getToken()
         if (token.isNullOrBlank()) {
             Log.d(TAG, "No token — skip upload")
             return Result.success()
         }
 
-        val pending = photoDao.getPendingUpload()
-        if (pending.isEmpty()) {
-            Log.d(TAG, "No pending photos")
-            return Result.success()
+        // Nếu nhiều ảnh → chạy foreground để KHÔNG bị cắt bởi giới hạn ~10 phút / HyperOS kill.
+        val totalToUpload = runCatching { photoDao.countPendingUpload() }.getOrDefault(0)
+        if (totalToUpload > FOREGROUND_THRESHOLD) {
+            runCatching { setForeground(buildForegroundInfo(0, totalToUpload)) }
+                .onFailure { Log.w(TAG, "setForeground failed", it) }
         }
 
-        Log.d(TAG, "Uploading ${pending.size} photos")
-        var failCount = 0
         val plain = "text/plain".toMediaTypeOrNull()
         val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
 
-        for (photo in pending) {
-            val file = photo.pathLocal?.let { File(it) }
-            if (file == null || !file.exists()) {
-                // File local đã mất — không còn gì để upload, dọn record luôn
-                photoDao.delete(photo)
-                continue
-            }
+        var totalSuccess = 0
+        var totalFail = 0
+        var uploadedSoFar = 0
+        var stalledRounds = 0
 
-            // containerNumber stores the numeric container ID as string (e.g. "16687")
-            val containerNumericId = photo.containerNumber?.toIntOrNull()
-            if (containerNumericId == null) {
-                Log.w(TAG, "Photo ${photo.id} has no numeric containerId, skip")
-                failCount++
-                continue
-            }
+        // Rút cạn TẤT CẢ ảnh chờ upload theo từng lô (LIMIT 10) tới khi hết. Nếu 1 lô lỗi hết
+        // (mạng chập chờn / NAS quá tải nhất thời) thì KHÔNG dừng hẳn — chờ ngắn rồi thử lại vài
+        // lần; hết kiên nhẫn mới thoát và để phần cuối quyết định retry (tự chạy lại), tránh cảnh
+        // "upload được một ít rồi dừng, phải bấm lại".
+        while (!isStopped) {
+            val pending = photoDao.getPendingUpload()
+            if (pending.isEmpty()) break
 
-            try {
-                setProgress(workDataOf(
-                    KEY_PROGRESS to "Đang upload ${file.name}",
-                    KEY_UPLOADED to pending.indexOf(photo),
-                    KEY_TOTAL to pending.size
-                ))
+            var batchProgress = 0
 
-                val containerIdPart = containerNumericId.toString().toRequestBody(plain)
-                val dateCreatePart = dateFormat.format(Date(photo.createdAt)).toRequestBody(plain)
-                val statusPart = photo.status.toRequestBody(plain)
-                val itemEorPart = photo.itemEorId?.toString()?.toRequestBody(plain)
-
-                val requestFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
-                val imagePart = MultipartBody.Part.createFormData("Image", file.name, requestFile)
-
-                val responseBody = apiService.uploadPhoto(
-                    containerId = containerIdPart,
-                    dateCreate = dateCreatePart,
-                    status = statusPart,
-                    itemEorId = itemEorPart,
-                    image = imagePart
-                )
-                responseBody.close()
-
-                // Server trả về 2xx → ảnh đã có trên server. Giống Xamarin (PhotoService.UploadPhotoAsync):
-                // chỉ đánh dấu isUploaded = true, KHÔNG xoá file/record ngay — giữ lại để xem offline,
-                // dọn dẹp sau bằng cleanupOldUploaded() (ngưỡng 7 ngày, giống Xamarin DeleteItemsOverTime)
-                photoDao.markUploaded(photo.id)
-                Log.d(TAG, "Uploaded photo ${photo.id}, marked as uploaded")
-
-                // Ảnh quét seal: gửi thêm 1 bản lên server OCR nội bộ để tập hợp dữ liệu huấn
-                // luyện model seal riêng, thay dần ocr.space. Best-effort — lỗi ở đây KHÔNG được
-                // làm fail việc upload ảnh chính (đã thành công ở trên rồi).
-                if (photo.isSeal && !photo.isSealUploaded) {
-                    runCatching {
-                        ocrService.uploadSealForTraining(file, photo.sealNumber, photo.containerNumber)
-                        photoDao.markSealUploaded(photo.id)
-                    }.onFailure { Log.w(TAG, "Upload seal training data failed for photo ${photo.id}", it) }
+            for (photo in pending) {
+                if (isStopped) break
+                val file = photo.pathLocal?.let { File(it) }
+                if (file == null || !file.exists()) {
+                    photoDao.delete(photo)   // file local đã mất — dọn record
+                    batchProgress++
+                    continue
                 }
 
-            } catch (e: Exception) {
-                val detail = describeUploadError(e)
-                Log.e(TAG, "Failed to upload photo ${photo.id}: $detail", e)
-                photoDao.markUploadError(photo.id, detail)
-                failCount++
+                // containerNumber lưu ID số container dạng String (vd "16687")
+                val containerNumericId = photo.containerNumber?.toIntOrNull()
+                if (containerNumericId == null) {
+                    Log.w(TAG, "Photo ${photo.id} has no numeric containerId, skip")
+                    photoDao.markUploadError(photo.id, "containerId không hợp lệ")
+                    totalFail++
+                    continue
+                }
+
+                try {
+                    setProgress(workDataOf(
+                        KEY_PROGRESS to "Đang upload ${file.name}",
+                        KEY_UPLOADED to uploadedSoFar,
+                        KEY_TOTAL to totalToUpload
+                    ))
+
+                    val containerIdPart = containerNumericId.toString().toRequestBody(plain)
+                    val dateCreatePart = dateFormat.format(Date(photo.createdAt)).toRequestBody(plain)
+                    val statusPart = photo.status.toRequestBody(plain)
+                    val itemEorPart = photo.itemEorId?.toString()?.toRequestBody(plain)
+
+                    val requestFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
+                    val imagePart = MultipartBody.Part.createFormData("Image", file.name, requestFile)
+
+                    val responseBody = apiService.uploadPhoto(
+                        containerId = containerIdPart,
+                        dateCreate = dateCreatePart,
+                        status = statusPart,
+                        itemEorId = itemEorPart,
+                        image = imagePart
+                    )
+                    responseBody.close()
+
+                    // 2xx → chỉ đánh dấu isUploaded (giống Xamarin), dọn file sau 7 ngày.
+                    photoDao.markUploaded(photo.id)
+                    batchProgress++
+                    totalSuccess++
+                    uploadedSoFar++
+
+                    // Cập nhật tiến độ notification foreground
+                    if (totalToUpload > FOREGROUND_THRESHOLD) {
+                        runCatching { setForeground(buildForegroundInfo(uploadedSoFar, totalToUpload)) }
+                    }
+
+                    // Ảnh quét seal: gửi thêm 1 bản lên server OCR nội bộ (best-effort)
+                    if (photo.isSeal && !photo.isSealUploaded) {
+                        runCatching {
+                            ocrService.uploadSealForTraining(file, photo.sealNumber, photo.containerNumber)
+                            photoDao.markSealUploaded(photo.id)
+                        }.onFailure { Log.w(TAG, "Upload seal training data failed for photo ${photo.id}", it) }
+                    }
+
+                } catch (e: Exception) {
+                    val detail = describeUploadError(e)
+                    Log.e(TAG, "Failed to upload photo ${photo.id}: $detail", e)
+                    photoDao.markUploadError(photo.id, detail)
+                    totalFail++
+                }
+            }
+
+            if (batchProgress == 0) {
+                // Lô này không tiến triển (đều lỗi mạng tạm) — chờ rồi thử lại, chưa bỏ cuộc ngay
+                stalledRounds++
+                if (stalledRounds >= MAX_STALLED_ROUNDS) break
+                delay(STALL_RETRY_DELAY_MS)
+            } else {
+                stalledRounds = 0
             }
         }
 
         cleanupOldUploaded()
 
-        return if (failCount > 0 && failCount == pending.size) Result.retry()
-        else Result.success()
+        // Còn ảnh pending (lô lỗi kéo dài / bị hệ thống thu hồi) → tự chạy lại (retry) thay vì bắt
+        // người dùng bấm tay. Chỉ bỏ cuộc (success → chờ periodic 15') nếu đã thử nhiều lần mà
+        // KHÔNG upload thêm được gì (tránh retry vô hạn khi có lỗi cố hữu).
+        val stillPending = runCatching { photoDao.countPendingUpload() > 0 }.getOrDefault(false)
+        return when {
+            !stillPending -> Result.success()
+            totalSuccess > 0 || runAttemptCount < MAX_RUN_ATTEMPTS -> Result.retry()
+            else -> Result.success()
+        }
+    }
+
+    private fun buildForegroundInfo(done: Int, total: Int): ForegroundInfo {
+        val notif = UploadNotifications.build(applicationContext, "Đang tải ảnh lên máy chủ", done, total)
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            ForegroundInfo(
+                UploadNotifications.NOTIF_ID_UPLOAD,
+                notif,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            ForegroundInfo(UploadNotifications.NOTIF_ID_UPLOAD, notif)
+        }
     }
 
     // Giống Xamarin DeleteItemsOverTime(): xoá ảnh đã upload quá 7 ngày để giải phóng dung lượng máy
@@ -153,11 +204,17 @@ class PhotoUploadWorker @AssistedInject constructor(
         const val KEY_TOTAL = "total_count"
         const val WORK_NAME = "photo_upload"
 
+        private const val FOREGROUND_THRESHOLD = 10   // >10 ảnh → chạy foreground
+        private const val MAX_STALLED_ROUNDS = 3      // số lần thử lại 1 lô lỗi trong cùng phiên
+        private const val STALL_RETRY_DELAY_MS = 4000L
+        private const val MAX_RUN_ATTEMPTS = 8        // số lần WorkManager retry trước khi nhường periodic
+
         fun enqueueImmediate(context: Context) {
             Log.d(TAG, "enqueueImmediate() called")
             val request = OneTimeWorkRequestBuilder<PhotoUploadWorker>()
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+                // LINEAR 15s để retry nhanh, không giãn theo cấp số nhân khi rút cạn nhiều đợt
+                .setBackoffCriteria(BackoffPolicy.LINEAR, 15, TimeUnit.SECONDS)
                 .addTag(WORK_NAME)
                 .build()
             // KEEP — khi đã có 1 worker "photo_upload" đang chạy/chờ, các lần bấm thêm là no-op
