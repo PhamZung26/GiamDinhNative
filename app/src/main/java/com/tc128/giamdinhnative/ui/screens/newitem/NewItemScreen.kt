@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -154,8 +155,15 @@ fun NewItemScreen(
                     }
                 },
                 trailingIcon = {
-                    if (uiState.containerNumber.length == 11 && uiState.containerNumberError == null) {
-                        Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF16A34A))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (uiState.containerNumber.length == 11 && uiState.containerNumberError == null) {
+                            Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF16A34A))
+                        }
+                        if (uiState.containerNumber.isNotEmpty()) {
+                            IconButton(onClick = { viewModel.onContainerNumberChange("") }) {
+                                Icon(Icons.Default.Close, contentDescription = "Xoá")
+                            }
+                        }
                     }
                 },
                 singleLine = true,
@@ -180,13 +188,15 @@ fun NewItemScreen(
                     label = "Size *",
                     selected = uiState.selectedSizeName,
                     options = uiState.sizes,
-                    onSelect = viewModel::onSizeChange
+                    onSelect = viewModel::onSizeChange,
+                    onClear = viewModel::onSizeClear
                 )
                 FilterableLookupDropdown(
                     label = "Operator *",
                     selected = uiState.selectedOptName,
                     options = uiState.opts,
-                    onSelect = viewModel::onOptChange
+                    onSelect = viewModel::onOptChange,
+                    onClear = viewModel::onOptClear
                 )
             }
 
@@ -272,7 +282,8 @@ private fun FilterableLookupDropdown(
     label: String,
     selected: String,
     options: List<Pair<Int, String>>,
-    onSelect: (Int) -> Unit
+    onSelect: (Int) -> Unit,
+    onClear: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
     // Đồng bộ lại khi selected đổi từ ngoài (vd: OCR tự điền Size) nhưng vẫn giữ
@@ -292,7 +303,20 @@ private fun FilterableLookupDropdown(
             value = query,
             onValueChange = { query = it; expanded = true },
             label = { Text(label) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            trailingIcon = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = {
+                            query = ""
+                            onClear()
+                            expanded = true
+                        }) {
+                            Icon(Icons.Default.Close, contentDescription = "Xoá")
+                        }
+                    }
+                    ExposedDropdownMenuDefaults.TrailingIcon(expanded)
+                }
+            },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
             singleLine = true,
             shape = RoundedCornerShape(12.dp),

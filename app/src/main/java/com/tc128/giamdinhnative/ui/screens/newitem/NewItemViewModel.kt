@@ -12,6 +12,7 @@ import com.tc128.giamdinhnative.session.SessionManager
 import com.tc128.giamdinhnative.util.ImageResizer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -68,8 +69,10 @@ class NewItemViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingLookups = true) }
             try {
-                val sizes = lookupRepository.getSizes()
-                val opts = lookupRepository.getOpts()
+                val sizesD = async { lookupRepository.getSizes() }
+                val optsD = async { lookupRepository.getOpts() }
+                val sizes = sizesD.await()
+                val opts = optsD.await()
                 _uiState.update { it.copy(isLoadingLookups = false, sizes = sizes, opts = opts) }
 
                 if (!hasPrefilledLastSelection) {
@@ -109,10 +112,18 @@ class NewItemViewModel @Inject constructor(
         viewModelScope.launch { sessionManager.saveLastSizeId(id) }
     }
 
+    fun onSizeClear() {
+        _uiState.update { it.copy(selectedSizeId = null, selectedSizeName = "") }
+    }
+
     fun onOptChange(id: Int) {
         val name = _uiState.value.opts.find { it.first == id }?.second ?: ""
         _uiState.update { it.copy(selectedOptId = id, selectedOptName = name) }
         viewModelScope.launch { sessionManager.saveLastOptId(id) }
+    }
+
+    fun onOptClear() {
+        _uiState.update { it.copy(selectedOptId = null, selectedOptName = "") }
     }
 
     fun dismissOcrTiming() = _uiState.update { it.copy(ocrTimingMessage = null) }
