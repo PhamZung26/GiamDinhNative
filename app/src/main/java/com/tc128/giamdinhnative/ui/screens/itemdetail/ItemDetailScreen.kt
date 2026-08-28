@@ -319,7 +319,7 @@ fun ItemDetailScreen(
                     options = monthOptions,
                     enabled = true,
                     onSelect = viewModel::onMonthChange,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1.3f)
                 )
                 OutlinedTextField(
                     value = uiState.yearManufacture,
