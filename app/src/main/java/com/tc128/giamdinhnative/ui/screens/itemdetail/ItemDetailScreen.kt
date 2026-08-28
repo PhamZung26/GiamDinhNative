@@ -311,16 +311,15 @@ fun ItemDetailScreen(
                 modifier = Modifier.fillMaxWidth(0.7f),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Tháng chỉ có 12 giá trị cố định — cho chọn thay vì gõ tay. Nội dung ngắn (01-12)
-                // nên chiếm ít diện tích hơn Năm (4 chữ số) — nhãn rút gọn "Tháng" tránh chiếm chỗ
-                // khi chưa có dữ liệu (container cũ chưa có trường này).
+                // Tháng chỉ có 12 giá trị cố định — cho chọn thay vì gõ tay. Nhãn rút gọn "Tháng"
+                // tránh chiếm chỗ khi chưa có dữ liệu (container cũ chưa có trường này).
                 LookupDropdown(
                     label = "Tháng",
                     selected = uiState.monthManufacture?.let { "%02d".format(it) },
                     options = monthOptions,
                     enabled = true,
                     onSelect = viewModel::onMonthChange,
-                    modifier = Modifier.weight(0.8f)
+                    modifier = Modifier.weight(1f)
                 )
                 OutlinedTextField(
                     value = uiState.yearManufacture,
@@ -330,7 +329,7 @@ fun ItemDetailScreen(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.weight(1.2f).autoBringIntoViewOnFocus()
+                    modifier = Modifier.weight(1f).autoBringIntoViewOnFocus()
                 )
             }
 
