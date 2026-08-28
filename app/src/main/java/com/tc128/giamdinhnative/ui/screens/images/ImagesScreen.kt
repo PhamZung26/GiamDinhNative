@@ -1,8 +1,12 @@
 package com.tc128.giamdinhnative.ui.screens.images
 
 import android.Manifest
+import android.content.Intent
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -12,9 +16,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -36,7 +47,7 @@ import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import com.tc128.giamdinhnative.ui.components.ZoomableImagePagerDialog
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun ImagesScreen(
     containerId: String,
@@ -47,6 +58,29 @@ fun ImagesScreen(
     val uiState by viewModel.uiState.collectAsState()
     val cameraPermission = rememberPermissionState(Manifest.permission.CAMERA)
     var zoomIndex by remember { mutableStateOf<Int?>(null) }
+    val context = LocalContext.current
+
+    // Mở share sheet khi ViewModel chuẩn bị xong danh sách Uri — sự kiện one-shot, phải báo lại
+    // viewModel.onShareHandled() để có thể share lại đúng lựa chọn đó lần nữa trong cùng phiên.
+    LaunchedEffect(uiState.shareUris) {
+        uiState.shareUris?.let { uris ->
+            if (uris.isNotEmpty()) {
+                val intent = if (uris.size == 1) {
+                    Intent(Intent.ACTION_SEND).apply {
+                        type = "image/*"
+                        putExtra(Intent.EXTRA_STREAM, uris[0])
+                    }
+                } else {
+                    Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                        type = "image/*"
+                        putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+                    }
+                }.apply { addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                context.startActivity(Intent.createChooser(intent, "Chia sẻ ảnh"))
+            }
+            viewModel.onShareHandled()
+        }
+    }
 
     // Danh sách ảnh gộp (local trước, server sau) — dùng cho next/pre trong màn xem ảnh toàn màn hình
     val allModels: List<Any> = remember(uiState.photos, uiState.serverUrls) {
@@ -66,39 +100,79 @@ fun ImagesScreen(
         }
     }
 
+    val totalCount = uiState.photos.size + uiState.serverUrls.size
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text("Hình ảnh", fontWeight = FontWeight.Bold)
-                        Text(containerId, fontFamily = FontFamily.Monospace,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.75f))
+                    if (uiState.isSelectMode) {
+                        Text("${uiState.selectedKeys.size} đã chọn", fontWeight = FontWeight.Bold)
+                    } else {
+                        Column {
+                            Text("Hình ảnh", fontWeight = FontWeight.Bold)
+                            Text(containerId, fontFamily = FontFamily.Monospace,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.75f))
+                        }
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, null)
+                    IconButton(onClick = { if (uiState.isSelectMode) viewModel.exitSelectMode() else onBack() }) {
+                        Icon(
+                            if (uiState.isSelectMode) Icons.Default.Close else Icons.AutoMirrored.Filled.ArrowBack,
+                            null
+                        )
+                    }
+                },
+                actions = {
+                    if (uiState.isSelectMode) {
+                        IconButton(onClick = {
+                            if (uiState.selectedKeys.size == totalCount) viewModel.deselectAll()
+                            else viewModel.selectAll()
+                        }) {
+                            Icon(Icons.Default.SelectAll, contentDescription = "Chọn tất cả / Bỏ chọn tất cả")
+                        }
+                        IconButton(
+                            onClick = { viewModel.shareSelected() },
+                            enabled = uiState.selectedKeys.isNotEmpty() && !uiState.isPreparingShare
+                        ) {
+                            if (uiState.isPreparingShare) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                            } else {
+                                Icon(Icons.Default.Share, contentDescription = "Chia sẻ")
+                            }
+                        }
+                    } else if (totalCount > 0) {
+                        IconButton(onClick = { viewModel.enterSelectMode() }) {
+                            Icon(Icons.Default.Checklist, contentDescription = "Chọn ảnh")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
+                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary,
+                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary
                 )
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    if (cameraPermission.status.isGranted) onOpenCamera(containerId)
-                    else cameraPermission.launchPermissionRequest()
-                },
-                shape = CircleShape,
-                containerColor = MaterialTheme.colorScheme.primary
-            ) {
-                Icon(Icons.Default.CameraAlt, null, tint = Color.White)
+            if (!uiState.isSelectMode) {
+                FloatingActionButton(
+                    onClick = {
+                        if (cameraPermission.status.isGranted) onOpenCamera(containerId)
+                        else cameraPermission.launchPermissionRequest()
+                    },
+                    shape = CircleShape,
+                    containerColor = MaterialTheme.colorScheme.primary
+                ) {
+                    Icon(Icons.Default.CameraAlt, null, tint = Color.White)
+                }
             }
         }
     ) { padding ->
@@ -138,15 +212,28 @@ fun ImagesScreen(
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         itemsIndexed(uiState.photos, key = { _, it -> "local_${it.id}" }) { index, photo ->
+                            val key = "local_${photo.id}"
                             PhotoGridItem(
                                 photo = photo,
                                 onDelete = { viewModel.deletePhoto(photo) },
-                                onZoom = { zoomIndex = index }
+                                onZoom = { zoomIndex = index },
+                                selectionMode = uiState.isSelectMode,
+                                selected = key in uiState.selectedKeys,
+                                onToggleSelect = { viewModel.toggleSelect(key) },
+                                onEnterSelect = { viewModel.enterSelectMode(); viewModel.toggleSelect(key) }
                             )
                         }
                         val localCount = uiState.photos.size
                         itemsIndexed(uiState.serverUrls, key = { _, it -> "server_$it" }) { index, url ->
-                            ServerPhotoGridItem(url = url, onZoom = { zoomIndex = localCount + index })
+                            val key = "server_$url"
+                            ServerPhotoGridItem(
+                                url = url,
+                                onZoom = { zoomIndex = localCount + index },
+                                selectionMode = uiState.isSelectMode,
+                                selected = key in uiState.selectedKeys,
+                                onToggleSelect = { viewModel.toggleSelect(key) },
+                                onEnterSelect = { viewModel.enterSelectMode(); viewModel.toggleSelect(key) }
+                            )
                         }
                         item { Spacer(Modifier.height(80.dp)) }
                     }
@@ -156,14 +243,29 @@ fun ImagesScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ServerPhotoGridItem(url: String, onZoom: () -> Unit) {
+private fun ServerPhotoGridItem(
+    url: String,
+    onZoom: () -> Unit,
+    selectionMode: Boolean,
+    selected: Boolean,
+    onToggleSelect: () -> Unit,
+    onEnterSelect: () -> Unit
+) {
     Box(
         modifier = Modifier
             .aspectRatio(1f)
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable(onClick = onZoom)
+            .combinedClickable(
+                onClick = { if (selectionMode) onToggleSelect() else onZoom() },
+                onLongClick = { if (!selectionMode) onEnterSelect() }
+            )
+            .then(
+                if (selected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
+                else Modifier
+            )
     ) {
         AsyncImage(
             model = url,
@@ -186,14 +288,30 @@ private fun ServerPhotoGridItem(url: String, onZoom: () -> Unit) {
                 modifier = Modifier.size(13.dp)
             )
         }
+        if (selectionMode) {
+            Icon(
+                imageVector = if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                contentDescription = null,
+                tint = if (selected) MaterialTheme.colorScheme.primary else Color.White,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(5.dp)
+                    .background(Color.Black.copy(alpha = 0.35f), CircleShape)
+            )
+        }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PhotoGridItem(
     photo: com.tc128.giamdinhnative.data.local.PhotoEntity,
     onDelete: () -> Unit,
-    onZoom: () -> Unit
+    onZoom: () -> Unit,
+    selectionMode: Boolean,
+    selected: Boolean,
+    onToggleSelect: () -> Unit,
+    onEnterSelect: () -> Unit
 ) {
     var showDelete by remember { mutableStateOf(false) }
     var showError by remember { mutableStateOf(false) }
@@ -215,7 +333,18 @@ private fun PhotoGridItem(
             .aspectRatio(1f)
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .then(if (imageModel != null) Modifier.clickable(onClick = onZoom) else Modifier)
+            .then(
+                if (imageModel != null) {
+                    Modifier.combinedClickable(
+                        onClick = { if (selectionMode) onToggleSelect() else onZoom() },
+                        onLongClick = { if (!selectionMode) onEnterSelect() }
+                    )
+                } else Modifier
+            )
+            .then(
+                if (selected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
+                else Modifier
+            )
     ) {
         if (imageModel != null) {
             AsyncImage(
@@ -251,6 +380,18 @@ private fun PhotoGridItem(
                     else -> Color(0xFFFBBF24)
                 },
                 modifier = Modifier.size(13.dp)
+            )
+        }
+
+        if (selectionMode && imageModel != null) {
+            Icon(
+                imageVector = if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                contentDescription = null,
+                tint = if (selected) MaterialTheme.colorScheme.primary else Color.White,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(5.dp)
+                    .background(Color.Black.copy(alpha = 0.35f), CircleShape)
             )
         }
     }
