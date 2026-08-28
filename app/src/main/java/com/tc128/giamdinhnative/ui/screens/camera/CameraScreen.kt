@@ -38,6 +38,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.tc128.giamdinhnative.util.rememberNavigationBarBottomDp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -270,6 +271,7 @@ fun CameraScreen(
         },
         containerColor = Color.Black,
     ) { padding ->
+        val navBarBottomDp = rememberNavigationBarBottomDp()
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -458,8 +460,7 @@ fun CameraScreen(
                     Row(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .navigationBarsPadding()
-                            .padding(bottom = 112.dp),
+                            .padding(bottom = navBarBottomDp + 112.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         presets.forEach { preset ->
@@ -495,8 +496,7 @@ fun CameraScreen(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(bottom = 24.dp, start = 32.dp, end = 32.dp),
+                    .padding(bottom = navBarBottomDp + 24.dp, start = 32.dp, end = 32.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {

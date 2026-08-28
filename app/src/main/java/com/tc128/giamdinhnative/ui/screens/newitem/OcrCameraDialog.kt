@@ -29,8 +29,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -38,13 +36,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.content.ContextCompat
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.tc128.giamdinhnative.ui.screens.camera.CameraSettingsViewModel
+import com.tc128.giamdinhnative.util.rememberDialogNavigationBarBottomDp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -163,24 +159,7 @@ fun OcrCameraDialog(
             dismissOnClickOutside = false
         )
     ) {
-        // WindowInsets của Compose trong Dialog thường trả 0 → navigationBarsPadding() vô tác dụng,
-        // nút chụp bị đè lên thanh điều hướng. Đọc chiều cao nav bar THỦ CÔNG qua insets listener của
-        // decorView để trừ chính xác (chạy đúng cả 3-nút lẫn cử chỉ).
-        val dialogView = LocalView.current
-        val density = LocalDensity.current
-        var navBarBottom by remember { mutableStateOf(0.dp) }
-        DisposableEffect(dialogView) {
-            (dialogView.parent as? DialogWindowProvider)?.window?.let {
-                WindowCompat.setDecorFitsSystemWindows(it, false)
-            }
-            androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(dialogView) { _, insets ->
-                val b = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
-                navBarBottom = with(density) { b.toDp() }
-                insets
-            }
-            androidx.core.view.ViewCompat.requestApplyInsets(dialogView)
-            onDispose { androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(dialogView, null) }
-        }
+        val navBarBottom = rememberDialogNavigationBarBottomDp()
         Box(
             modifier = Modifier
                 .fillMaxSize()
