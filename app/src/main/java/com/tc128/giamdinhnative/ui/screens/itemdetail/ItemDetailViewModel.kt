@@ -43,6 +43,7 @@ data class ItemDetailUiState(
     val containerNumber: String = "",
     val seal: String = "",
     val yearManufacture: String = "",
+    val monthManufacture: Int? = null,
     val tinhTrang: String = "",
     val remark: String = "",
     val isDamage: Boolean = false,
@@ -120,6 +121,7 @@ class ItemDetailViewModel @Inject constructor(
                     containerNumber = container?.containerNumber ?: "",
                     seal = container?.seal ?: "",
                     yearManufacture = container?.yearManufacture?.toString() ?: "",
+                    monthManufacture = container?.monthManufacture,
                     tinhTrang = container?.tinhTrang ?: "",
                     remark = container?.remark ?: "",
                     isDamage = container?.isDamage ?: false,
@@ -188,6 +190,7 @@ class ItemDetailViewModel @Inject constructor(
     }
     fun onSealChange(v: String) = _uiState.update { it.copy(seal = v, isDirty = true) }
     fun onYearChange(v: String) = _uiState.update { it.copy(yearManufacture = v.filter(Char::isDigit).take(4), isDirty = true) }
+    fun onMonthChange(month: Int) = _uiState.update { it.copy(monthManufacture = month, isDirty = true) }
     fun onTinhTrangChange(v: String) = _uiState.update { it.copy(tinhTrang = v, isDirty = true) }
     fun onRemarkChange(v: String) = _uiState.update { it.copy(remark = v, isDirty = true) }
     fun onIsDamageChange(v: Boolean) = _uiState.update { it.copy(isDamage = v, isDirty = true) }
@@ -250,6 +253,7 @@ class ItemDetailViewModel @Inject constructor(
                     tinhTrang = state.tinhTrang.ifBlank { null },
                     seal = state.seal.ifBlank { null },
                     yearManufacture = state.yearManufacture.toIntOrNull(),
+                    monthManufacture = state.monthManufacture,
                     isDamage = state.isDamage,
                     isDirty = state.isNeedClean
                 )

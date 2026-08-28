@@ -52,6 +52,7 @@ class ContainerRepository @Inject constructor(
         tinhTrang: String? = null,
         seal: String? = null,
         yearManufacture: Int? = null,
+        monthManufacture: Int? = null,
         isDamage: Boolean? = null,
         isDirty: Boolean? = null,
         statusOfContainer: Int? = null
@@ -67,6 +68,7 @@ class ContainerRepository @Inject constructor(
             tinhTrang?.let       { add(JsonPatchOperation("replace", "/tinhTrang",          JsonPrimitive(it))) }
             seal?.let            { add(JsonPatchOperation("replace", "/seal",               JsonPrimitive(it))) }
             yearManufacture?.let { add(JsonPatchOperation("replace", "/yearManuacture",     JsonPrimitive(it))) }
+            monthManufacture?.let{ add(JsonPatchOperation("replace", "/monthManuacture",    JsonPrimitive(it))) }
             isDamage?.let        { add(JsonPatchOperation("replace", "/isDamage",           JsonPrimitive(it))) }
             isDirty?.let         { add(JsonPatchOperation("replace", "/isDirty",            JsonPrimitive(it))) }
             statusOfContainer?.let { add(JsonPatchOperation("replace", "/statusOfContainer", JsonPrimitive(it))) }

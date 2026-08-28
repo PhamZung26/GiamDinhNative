@@ -53,6 +53,7 @@ fun ItemDetailScreen(
     viewModel: ItemDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val monthOptions = remember { (1..12).map { it to "%02d".format(it) } }
     val snackbarHostState = remember { SnackbarHostState() }
     var showSealScanDialog by remember { mutableStateOf(false) }
     val cameraPermission = rememberPermissionState(Manifest.permission.CAMERA)
@@ -305,17 +306,31 @@ fun ItemDetailScreen(
                 onSelect = viewModel::onCleanMethodChange
             )
 
-            // ── Năm SX ─────────────────────────────────────────────────────
-            OutlinedTextField(
-                value = uiState.yearManufacture,
-                onValueChange = viewModel::onYearChange,
-                readOnly = false,
-                label = { Text("Năm SX") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth(0.4f).autoBringIntoViewOnFocus()
-            )
+            // ── Năm SX | Tháng SX ─────────────────────────────────────────────
+            Row(
+                modifier = Modifier.fillMaxWidth(0.7f),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(
+                    value = uiState.yearManufacture,
+                    onValueChange = viewModel::onYearChange,
+                    readOnly = false,
+                    label = { Text("Năm SX") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1f).autoBringIntoViewOnFocus()
+                )
+                // Tháng chỉ có 12 giá trị cố định — cho chọn thay vì gõ tay
+                LookupDropdown(
+                    label = "Tháng SX",
+                    selected = uiState.monthManufacture?.let { "%02d".format(it) },
+                    options = monthOptions,
+                    enabled = true,
+                    onSelect = viewModel::onMonthChange,
+                    modifier = Modifier.weight(1f)
+                )
+            }
 
             // ── Seal — chiếm trọn hàng để hiển thị đủ ký tự, số seal thường dài 8-11 ký tự ──
             OutlinedTextField(

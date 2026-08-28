@@ -38,6 +38,7 @@ data class Container(
     @SerialName("cleanMethodId") val cleanMethodId: Int? = null,
     @SerialName("billNoGateIn") val billNoGateIn: String? = null,
     @SerialName("yearManuacture") val yearManufacture: Int? = null,
+    @SerialName("monthManuacture") val monthManufacture: Int? = null,
     @SerialName("pointGrade") val pointGrade: Int? = null,
     @SerialName("isDamage") val isDamage: Boolean? = null,
     @SerialName("isDirty") val isDirty: Boolean? = null,
