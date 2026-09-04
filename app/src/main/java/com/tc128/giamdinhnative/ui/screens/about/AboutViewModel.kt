@@ -28,7 +28,15 @@ data class AboutUiState(
     val updateError: String? = null,
 
     val isSyncingCatalog: Boolean = false,
-    val catalogSyncMessage: String? = null
+    val catalogSyncMessage: String? = null,
+
+    // Cấu hình: kích cỡ resize + số lượng ảnh upload tối đa/lô + engine quét seal
+    val resizeMaxDim: Int = 1280,
+    val maxUploadCount: Int = 1000,
+    val sealUseMlKit: Boolean = false,
+    // Loại vệ sinh hiển thị mặc định (đa chọn) ở màn "Container cần vệ sinh"
+    val cleanMethods: List<Pair<Int, String>> = emptyList(),
+    val defaultCleanMethodIds: Set<Int> = emptySet()
 )
 
 @HiltViewModel
@@ -56,7 +64,12 @@ class AboutViewModel @Inject constructor(
                 it.copy(
                     username = username,
                     pendingUploadCount = pending,
-                    currentVersionName = updateChecker.currentVersionName
+                    currentVersionName = updateChecker.currentVersionName,
+                    resizeMaxDim = sessionManager.getResizeMaxDim(),
+                    maxUploadCount = sessionManager.getMaxUploadCount(),
+                    sealUseMlKit = sessionManager.getSealUseMlKit(),
+                    cleanMethods = runCatching { lookupRepository.getCleanMethods() }.getOrDefault(emptyList()),
+                    defaultCleanMethodIds = sessionManager.getDefaultCleanMethodIds()
                 )
             }
         }
@@ -118,6 +131,28 @@ class AboutViewModel @Inject constructor(
     }
 
     fun dismissCatalogSyncMessage() = _uiState.update { it.copy(catalogSyncMessage = null) }
+
+    fun setResizeMaxDim(dim: Int) {
+        _uiState.update { it.copy(resizeMaxDim = dim) }
+        viewModelScope.launch { sessionManager.saveResizeMaxDim(dim) }
+    }
+
+    fun setMaxUploadCount(count: Int) {
+        _uiState.update { it.copy(maxUploadCount = count) }
+        viewModelScope.launch { sessionManager.saveMaxUploadCount(count) }
+    }
+
+    fun setSealUseMlKit(enabled: Boolean) {
+        _uiState.update { it.copy(sealUseMlKit = enabled) }
+        viewModelScope.launch { sessionManager.saveSealUseMlKit(enabled) }
+    }
+
+    fun toggleDefaultCleanMethod(id: Int) {
+        val set = _uiState.value.defaultCleanMethodIds.toMutableSet()
+        if (!set.add(id)) set.remove(id)
+        _uiState.update { it.copy(defaultCleanMethodIds = set) }
+        viewModelScope.launch { sessionManager.saveDefaultCleanMethodIds(set) }
+    }
 
     fun logout() {
         viewModelScope.launch {

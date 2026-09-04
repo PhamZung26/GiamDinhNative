@@ -83,6 +83,14 @@ fun CameraScreen(
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
 
+    // Watchdog chống màn đen: nhiều máy (MIUI/Redmi) bind "thành công" nhưng HAL không đẩy frame →
+    // preview đen mà KHÔNG ném exception; và mode đúng KHÁC nhau theo máy (máy này TextureView đen,
+    // máy kia SurfaceView đen). Giám sát previewStreamState; nếu ~3s không STREAMING thì đổi mode +
+    // rebind (thử cả COMPATIBLE lẫn PERFORMANCE). Tín hiệu trực tiếp cho màn đen → hết đen mọi máy.
+    var implMode by remember { mutableStateOf(PreviewView.ImplementationMode.COMPATIBLE) }
+    var previewStreaming by remember { mutableStateOf(false) }
+    var recoveryAttempt by remember { mutableIntStateOf(0) }
+
     // Camera vật lý ultra-wide (0.5x) — null nếu máy không có/không phát hiện được
     val ultrawideCameraId = remember { com.tc128.giamdinhnative.util.findUltrawideCameraId(context) }
     var useUltrawide by remember { mutableStateOf(false) }
@@ -148,7 +156,7 @@ fun CameraScreen(
             for (pending in pipeline) {
                 try {
                     val t3 = System.currentTimeMillis()
-                    val path = compressAndSave(context, pending.bytes, pending.rotationDegrees)
+                    val path = compressAndSave(context, pending.bytes, pending.rotationDegrees, camSettings.resizeMaxDim)
                     val t4 = System.currentTimeMillis()
 
                     val tSensor  = pending.t1Captured - pending.t0Press
@@ -196,11 +204,10 @@ fun CameraScreen(
         onDispose { listener.disable() }
     }
 
-    // Rebind sang camera vật lý ultra-wide khi bật 0.5x, rebind lại camera chính khi tắt
-    // (bỏ qua lần đầu — factory của AndroidView đã tự bind camera chính rồi)
+    // Bind camera MỖI khi previewView có/đổi (kể cả khi watchdog tạo lại PreviewView để đổi mode)
+    // hoặc khi bật/tắt ultra-wide. Chỉ một chỗ bind duy nhất (factory KHÔNG bind) → tránh bind đôi.
     LaunchedEffect(useUltrawide, previewView) {
         val pv = previewView ?: return@LaunchedEffect
-        if (camera == null) return@LaunchedEffect // lần bind đầu do factory lo, tránh bind đôi
         bindCamera(
             context, lifecycleOwner, pv, flashMode,
             ultrawideCameraId = if (useUltrawide) ultrawideCameraId else null,
@@ -215,6 +222,32 @@ fun CameraScreen(
                 }
             }
         )
+    }
+
+    // Theo dõi preview có thực sự lên hình (STREAMING) không
+    DisposableEffect(previewView) {
+        val pv = previewView
+        previewStreaming = false
+        val streamObs = androidx.lifecycle.Observer<PreviewView.StreamState> { st ->
+            previewStreaming = (st == PreviewView.StreamState.STREAMING)
+        }
+        pv?.previewStreamState?.observeForever(streamObs)
+        onDispose { pv?.previewStreamState?.removeObserver(streamObs) }
+    }
+
+    // Watchdog: sau khi bind ~3s mà preview chưa STREAMING → đổi mode (TextureView↔SurfaceView) và
+    // rebind. Tối đa 2 lần (thử cả 2 mode). Đổi implMode → key() tạo lại PreviewView → LaunchedEffect
+    // trên rebind lại.
+    LaunchedEffect(previewView, recoveryAttempt) {
+        previewView ?: return@LaunchedEffect
+        delay(3000)
+        if (!previewStreaming && recoveryAttempt < 2) {
+            Log.w(TAG, "Preview chưa STREAMING sau 3s (mode=$implMode) — đổi mode & rebind")
+            implMode = if (implMode == PreviewView.ImplementationMode.COMPATIBLE)
+                PreviewView.ImplementationMode.PERFORMANCE
+            else PreviewView.ImplementationMode.COMPATIBLE
+            recoveryAttempt++
+        }
     }
 
     DisposableEffect(Unit) {
@@ -278,21 +311,15 @@ fun CameraScreen(
                 .padding(padding)
         ) {
             // ── Camera Preview ──────────────────────────────────────────────
+            // key(implMode): khi watchdog đổi mode → tạo LẠI PreviewView với mode mới; việc bind do
+            // LaunchedEffect(useUltrawide, previewView) đảm nhận (factory KHÔNG bind → tránh bind đôi).
+            key(implMode) {
             AndroidView(
                 factory = { ctx ->
                     PreviewView(ctx).also { pv ->
-                        // COMPATIBLE (TextureView) tương thích rộng hơn PERFORMANCE (SurfaceView)
-                        // — tránh màn hình đen trên Redmi/Snapdragon mid-range
-                        pv.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                        pv.implementationMode = implMode
                         pv.scaleType = PreviewView.ScaleType.FILL_CENTER
                         previewView = pv
-                        bindCamera(ctx, lifecycleOwner, pv, flashMode,
-                            ultrawideCameraId = null,
-                            onCameraReady = { cam, capture ->
-                                camera = cam
-                                imageCapture = capture
-                            }
-                        )
                     }
                 },
                 modifier = Modifier
@@ -327,6 +354,7 @@ fun CameraScreen(
                         }
                     }
             )
+            }  // end key(implMode)
 
             // ── Snackbar ở trên đầu ─────────────────────────────────────────
             SnackbarHost(
@@ -677,16 +705,15 @@ private fun startContinuousAutoFocus(camera: Camera, previewView: PreviewView) {
 
 // ── Image processing pipeline ─────────────────────────────────────────────────
 
-private fun compressAndSave(context: Context, bytes: ByteArray, rotationDegrees: Int): String {
+private fun compressAndSave(context: Context, bytes: ByteArray, rotationDegrees: Int, maxDim: Int): String {
     // Bước 1: đọc kích thước gốc (không decode pixel — cực nhanh)
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
 
-    // Bước 2: tính inSampleSize để decode thẳng ở kích thước gần đích (1280)
-    // → tránh load full 12MP (~48MB RAM) vào memory rồi mới scale.
-    // Phải ≥ maxDim cuối cùng (ImageResizer.resizeFile = 1280) để bước resize chính xác
-    // sau đó không bị giới hạn bởi ảnh đã bị cắt nét từ bước lưu nhanh này.
-    val sampleSize = calcSampleSize(bounds.outWidth, bounds.outHeight, maxDim = 1280)
+    // Bước 2: tính inSampleSize để decode thẳng ở kích thước gần đích (maxDim cấu hình)
+    // → tránh load full 12MP vào RAM rồi mới scale. Phải ≥ maxDim cuối (ImageResizer.resizeFile)
+    // để bước resize sau không bị giới hạn bởi ảnh đã bị giảm nét ở bước lưu nhanh này.
+    val sampleSize = calcSampleSize(bounds.outWidth, bounds.outHeight, maxDim = maxDim)
     val opts = BitmapFactory.Options().apply {
         inSampleSize = sampleSize
         inPreferredConfig = Bitmap.Config.RGB_565   // 2 bytes/pixel thay vì 4 → nhanh hơn 2x

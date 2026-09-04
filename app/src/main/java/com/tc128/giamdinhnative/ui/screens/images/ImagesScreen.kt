@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
@@ -59,6 +60,14 @@ fun ImagesScreen(
     val cameraPermission = rememberPermissionState(Manifest.permission.CAMERA)
     var zoomIndex by remember { mutableStateOf<Int?>(null) }
     val context = LocalContext.current
+
+    // Chọn ảnh từ bộ sưu tập (nút riêng, cạnh nút chụp)
+    val galleryVm: com.tc128.giamdinhnative.ui.screens.camera.GalleryImportViewModel = hiltViewModel()
+    val galleryPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(10)
+    ) { uris ->
+        if (uris.isNotEmpty()) galleryVm.import(uris, containerId, null, "Available", updateCleanDate = false)
+    }
 
     // Mở share sheet khi ViewModel chuẩn bị xong danh sách Uri — sự kiện one-shot, phải báo lại
     // viewModel.onShareHandled() để có thể share lại đúng lựa chọn đó lần nữa trong cùng phiên.
@@ -163,15 +172,31 @@ fun ImagesScreen(
         },
         floatingActionButton = {
             if (!uiState.isSelectMode) {
-                FloatingActionButton(
-                    onClick = {
-                        if (cameraPermission.status.isGranted) onOpenCamera(containerId)
-                        else cameraPermission.launchPermissionRequest()
-                    },
-                    shape = CircleShape,
-                    containerColor = MaterialTheme.colorScheme.primary
-                ) {
-                    Icon(Icons.Default.CameraAlt, null, tint = Color.White)
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // Chọn ảnh từ thư viện
+                    SmallFloatingActionButton(
+                        onClick = {
+                            galleryPicker.launch(
+                                androidx.activity.result.PickVisualMediaRequest(
+                                    androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly
+                                )
+                            )
+                        },
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    ) {
+                        Icon(Icons.Default.PhotoLibrary, contentDescription = "Chọn ảnh từ thư viện")
+                    }
+                    // Chụp ảnh
+                    FloatingActionButton(
+                        onClick = {
+                            if (cameraPermission.status.isGranted) onOpenCamera(containerId)
+                            else cameraPermission.launchPermissionRequest()
+                        },
+                        shape = CircleShape,
+                        containerColor = MaterialTheme.colorScheme.primary
+                    ) {
+                        Icon(Icons.Default.CameraAlt, null, tint = Color.White)
+                    }
                 }
             }
         }

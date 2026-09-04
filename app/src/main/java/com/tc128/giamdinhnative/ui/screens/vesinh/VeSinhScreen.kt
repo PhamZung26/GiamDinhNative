@@ -6,6 +6,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,6 +32,16 @@ fun VeSinhScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val cameraPermission = rememberPermissionState(Manifest.permission.CAMERA)
+
+    // Chọn ảnh vệ sinh từ bộ sưu tập (nút riêng cạnh nút chụp)
+    val galleryVm: com.tc128.giamdinhnative.ui.screens.camera.GalleryImportViewModel = hiltViewModel()
+    val galleryPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(10)
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            galleryVm.import(uris, containerId.toString(), null, "Available", updateCleanDate = true)
+        }
+    }
 
     // Reload mỗi khi quay lại màn hình (vd: sau khi chụp ảnh vệ sinh) để thấy DateTimeClean mới
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -115,17 +126,28 @@ fun VeSinhScreen(
 
             Button(
                 onClick = {
-                    if (cameraPermission.status.isGranted) {
-                        onOpenCamera()
-                    } else {
-                        cameraPermission.launchPermissionRequest()
-                    }
+                    if (cameraPermission.status.isGranted) onOpenCamera()
+                    else cameraPermission.launchPermissionRequest()
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(Icons.Default.CameraAlt, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Chụp ảnh vệ sinh")
+            }
+            OutlinedButton(
+                onClick = {
+                    galleryPicker.launch(
+                        androidx.activity.result.PickVisualMediaRequest(
+                            androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly
+                        )
+                    )
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.PhotoLibrary, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Chọn ảnh vệ sinh")
             }
         }
     }

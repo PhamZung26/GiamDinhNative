@@ -16,7 +16,11 @@ data class LoginUiState(
     val password: String = "",
     val isLoading: Boolean = false,
     val isLoggedIn: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    // Cấu hình máy chủ
+    val activeServer: String = SessionManager.DEFAULT_SERVER_URL,
+    val serverList: List<String> = emptyList(),
+    val showServerDialog: Boolean = false
 )
 
 @HiltViewModel
@@ -27,6 +31,43 @@ class LoginViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState = _uiState.asStateFlow()
+
+    init { loadServers() }
+
+    private fun loadServers() {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(activeServer = sessionManager.cachedServerUrl, serverList = sessionManager.getServerList())
+            }
+        }
+    }
+
+    fun openServerDialog() = _uiState.update { it.copy(showServerDialog = true) }
+    fun closeServerDialog() = _uiState.update { it.copy(showServerDialog = false) }
+
+    // Chọn 1 server có sẵn làm active
+    fun selectServer(url: String) {
+        viewModelScope.launch {
+            sessionManager.saveServerUrl(url)
+            _uiState.update { it.copy(activeServer = sessionManager.cachedServerUrl, serverList = sessionManager.getServerList()) }
+        }
+    }
+
+    // Thêm server mới (gõ URL) → tự chọn làm active + lưu vào danh sách
+    fun addServer(url: String) {
+        if (url.isBlank()) return
+        viewModelScope.launch {
+            sessionManager.saveServerUrl(url)
+            _uiState.update { it.copy(activeServer = sessionManager.cachedServerUrl, serverList = sessionManager.getServerList()) }
+        }
+    }
+
+    fun removeServer(url: String) {
+        viewModelScope.launch {
+            sessionManager.removeServer(url)
+            _uiState.update { it.copy(activeServer = sessionManager.cachedServerUrl, serverList = sessionManager.getServerList()) }
+        }
+    }
 
     fun onUsernameChange(value: String) = _uiState.update { it.copy(username = value, error = null) }
     fun onPasswordChange(value: String) = _uiState.update { it.copy(password = value, error = null) }

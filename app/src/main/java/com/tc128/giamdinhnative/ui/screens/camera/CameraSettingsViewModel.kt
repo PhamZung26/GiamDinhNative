@@ -34,6 +34,9 @@ class CameraSettingsViewModel @Inject constructor(
         viewModelScope.launch { sessionManager.saveLastFlashMode(mode) }
     }
 
+    // Kích cỡ resize người dùng cấu hình — dùng cho bước lưu ảnh trung gian ở CameraScreen
+    val resizeMaxDim: Int get() = sessionManager.cachedResizeMaxDim
+
     companion object {
         const val UNLOADED = -1
         val DEFAULT_FLASH = ImageCapture.FLASH_MODE_AUTO

@@ -64,7 +64,7 @@ class PhotoUploadWorker @AssistedInject constructor(
         // lần; hết kiên nhẫn mới thoát và để phần cuối quyết định retry (tự chạy lại), tránh cảnh
         // "upload được một ít rồi dừng, phải bấm lại".
         while (!isStopped) {
-            val pending = photoDao.getPendingUpload()
+            val pending = photoDao.getPendingUpload(sessionManager.cachedMaxUploadCount)
             if (pending.isEmpty()) break
 
             var batchProgress = 0

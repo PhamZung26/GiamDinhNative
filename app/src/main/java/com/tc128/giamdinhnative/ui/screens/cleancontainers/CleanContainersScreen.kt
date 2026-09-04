@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.repeatOnLifecycle
 import com.tc128.giamdinhnative.data.model.Container
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -30,14 +31,20 @@ fun CleanContainersScreen(
     val uiState by viewModel.uiState.collectAsState()
     var showFilterDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) { viewModel.load() }
+    // Đọc lại mỗi khi vào màn hình để cấu hình "loại vệ sinh mặc định" (tab Thông tin) có hiệu lực ngay
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+            viewModel.load()
+        }
+    }
 
     if (showFilterDialog) {
         CleanMethodFilterDialog(
             cleanMethods = uiState.cleanMethods,
-            selectedId = uiState.selectedCleanMethodId,
+            selectedIds = uiState.selectedCleanMethodIds,
             isFilterJustClean = uiState.isFilterJustClean,
-            onSelectCleanMethod = viewModel::onCleanMethodFilterChange,
+            onToggleCleanMethod = viewModel::onToggleCleanMethod,
             onFilterJustCleanChange = viewModel::onFilterJustCleanChange,
             onDismiss = { showFilterDialog = false }
         )
@@ -148,15 +155,14 @@ private fun formatGateinDate(iso: String?): String? {
     return runCatching { java.time.LocalDateTime.parse(iso).format(gateinOutputFormatter) }.getOrNull()
 }
 
-// Popup lọc — tương đương popup "Lọc theo phương án vệ sinh" của Xamarin (chip chọn 1 phương án,
-// không có lựa chọn "Tất cả", kèm checkbox hiện container vừa vệ sinh xong)
+// Popup lọc — đa chọn phương án vệ sinh (hiển thị gộp), kèm switch hiện container vừa vệ sinh xong
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CleanMethodFilterDialog(
     cleanMethods: List<Pair<Int, String>>,
-    selectedId: Int?,
+    selectedIds: Set<Int>,
     isFilterJustClean: Boolean,
-    onSelectCleanMethod: (Int) -> Unit,
+    onToggleCleanMethod: (Int) -> Unit,
     onFilterJustCleanChange: (Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -171,8 +177,8 @@ private fun CleanMethodFilterDialog(
                 ) {
                     cleanMethods.forEach { (id, name) ->
                         FilterChip(
-                            selected = selectedId == id,
-                            onClick = { onSelectCleanMethod(id) },
+                            selected = id in selectedIds,
+                            onClick = { onToggleCleanMethod(id) },
                             label = { Text(name) }
                         )
                     }

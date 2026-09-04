@@ -2,6 +2,7 @@ package com.tc128.giamdinhnative.ui.screens.about
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -254,6 +255,69 @@ fun AboutScreen(
                 }
             }
 
+            Spacer(Modifier.height(16.dp))
+
+            // ── Cấu hình ảnh & upload ──────────────────────────────────────
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Cấu hình ảnh & upload", style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary)
+                    HorizontalDivider()
+
+                    Text("Kích cỡ resize ảnh (px)", style = MaterialTheme.typography.bodyMedium)
+                    ChipSelectRow(
+                        options = listOf(680, 1024, 1280, 1920, 2560),
+                        selected = uiState.resizeMaxDim,
+                        onSelect = viewModel::setResizeMaxDim
+                    )
+
+                    Text("Số lượng ảnh upload tối đa mỗi lô", style = MaterialTheme.typography.bodyMedium)
+                    ChipSelectRow(
+                        options = listOf(100, 300, 500, 1000, 2000),
+                        selected = uiState.maxUploadCount,
+                        onSelect = viewModel::setMaxUploadCount
+                    )
+
+                    HorizontalDivider()
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Quét số chì bằng ML Kit (offline)", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                if (uiState.sealUseMlKit) "Đang dùng ML Kit (trên máy)" else "Đang dùng OCR.space (online)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = uiState.sealUseMlKit,
+                            onCheckedChange = viewModel::setSealUseMlKit
+                        )
+                    }
+
+                    if (uiState.cleanMethods.isNotEmpty()) {
+                        HorizontalDivider()
+                        Text("Loại vệ sinh hiển thị mặc định (màn Container cần vệ sinh)",
+                            style = MaterialTheme.typography.bodyMedium)
+                        Text("Chọn được nhiều loại cùng lúc", style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            uiState.cleanMethods.forEach { (id, name) ->
+                                FilterChip(
+                                    selected = id in uiState.defaultCleanMethodIds,
+                                    onClick = { viewModel.toggleDefaultCleanMethod(id) },
+                                    label = { Text(name) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.height(32.dp))
 
             OutlinedButton(
@@ -269,6 +333,22 @@ fun AboutScreen(
             // Né NavigationBar dưới cùng (BottomBar tab) — không dựa vào Scaffold's bottom padding
             // vì NavigationBar đã tự chiếm đúng phần không gian của nó rồi (xem MainScreen.kt)
             Spacer(Modifier.navigationBarsPadding().height(32.dp))
+        }
+    }
+}
+
+@Composable
+private fun ChipSelectRow(options: List<Int>, selected: Int, onSelect: (Int) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        options.forEach { opt ->
+            FilterChip(
+                selected = opt == selected,
+                onClick = { onSelect(opt) },
+                label = { Text(opt.toString()) }
+            )
         }
     }
 }

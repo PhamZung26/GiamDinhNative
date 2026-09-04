@@ -68,6 +68,7 @@ class ItemDetailViewModel @Inject constructor(
     private val lookupRepository: LookupRepository,
     private val ocrService: OcrService,
     private val photoRepository: PhotoRepository,
+    private val sessionManager: com.tc128.giamdinhnative.session.SessionManager,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -204,7 +205,9 @@ class ItemDetailViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isScanningSeal = true, error = null) }
             try {
-                val result = ocrService.scanSeal(bytes, rotationDegrees)
+                val useMlKit = sessionManager.getSealUseMlKit()
+                val result = if (useMlKit) ocrService.scanSealMlKit(bytes, rotationDegrees)
+                             else ocrService.scanSeal(bytes, rotationDegrees)
                 // Giống Xamarin Scanseal() -> photoService.TakePic(): ảnh quét seal cũng được lưu
                 // làm ảnh container (status Available), không chỉ dùng để OCR rồi bỏ.
                 // containerNumber của PhotoEntity lưu ID số (dạng String) — khớp convention dùng
@@ -224,7 +227,11 @@ class ItemDetailViewModel @Inject constructor(
                         isScanningSeal = false,
                         seal = result.sealNo.ifBlank { it.seal },
                         isDirty = it.isDirty || result.sealNo.isNotBlank(),
-                        saveMessage = if (result.sealNo.isNotBlank()) "Đã nhận dạng được số chì: ${result.sealNo}" else "Không nhận dạng được số chì"
+                        saveMessage = run {
+                            val engine = if (useMlKit) "ML Kit" else "OCR.space"
+                            if (result.sealNo.isNotBlank()) "[$engine] Số chì: ${result.sealNo}"
+                            else "[$engine] Không nhận dạng được số chì"
+                        }
                     )
                 }
             } catch (e: Exception) {

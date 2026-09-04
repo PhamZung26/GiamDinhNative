@@ -1,7 +1,7 @@
 {
     "logs": [
         {
-            "outputFile": "com.tc128.giamdinhnative.app-mergeReleaseResources-77:/values-v23/values-v23.xml",
+            "outputFile": "com.tc128.giamdinhnative.app-mergeReleaseResources-79:/values-v23/values-v23.xml",
             "map": [
                 {
                     "source": "C:\\Users\\Admin\\.gradle\\caches\\8.9\\transforms\\29f085cfbef2792e0ceff3b93d0f7303\\transformed\\work-runtime-2.10.0\\res\\values-v23\\values-v23.xml",

@@ -1,7 +1,7 @@
 {
     "logs": [
         {
-            "outputFile": "com.tc128.giamdinhnative.app-mergeReleaseResources-77:/values-xlarge-v4/values-xlarge-v4.xml",
+            "outputFile": "com.tc128.giamdinhnative.app-mergeReleaseResources-79:/values-xlarge-v4/values-xlarge-v4.xml",
             "map": [
                 {
                     "source": "C:\\Users\\Admin\\.gradle\\caches\\8.9\\transforms\\06f280452aa639ac5712fc547a3cebe0\\transformed\\appcompat-1.6.1\\res\\values-xlarge-v4\\values-xlarge-v4.xml",

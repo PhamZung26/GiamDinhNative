@@ -67,6 +67,31 @@ fun OcrCameraDialog(
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
     var isCapturing by remember { mutableStateOf(false) }
 
+    // Watchdog chống màn đen (xem CameraScreen): giám sát previewStreamState, ~3s không STREAMING
+    // thì đổi mode (TextureView↔SurfaceView) + rebind. Mode đúng khác nhau theo máy (MIUI/Redmi).
+    var implMode by remember { mutableStateOf(PreviewView.ImplementationMode.COMPATIBLE) }
+    var previewStreaming by remember { mutableStateOf(false) }
+    var recoveryAttempt by remember { mutableIntStateOf(0) }
+    DisposableEffect(previewView) {
+        val pv = previewView
+        previewStreaming = false
+        val streamObs = androidx.lifecycle.Observer<PreviewView.StreamState> { st ->
+            previewStreaming = (st == PreviewView.StreamState.STREAMING)
+        }
+        pv?.previewStreamState?.observeForever(streamObs)
+        onDispose { pv?.previewStreamState?.removeObserver(streamObs) }
+    }
+    LaunchedEffect(previewView, recoveryAttempt) {
+        previewView ?: return@LaunchedEffect
+        delay(3000)
+        if (!previewStreaming && recoveryAttempt < 2) {
+            implMode = if (implMode == PreviewView.ImplementationMode.COMPATIBLE)
+                PreviewView.ImplementationMode.PERFORMANCE
+            else PreviewView.ImplementationMode.COMPATIBLE
+            recoveryAttempt++
+        }
+    }
+
     // Flash nhớ lựa chọn gần nhất (persist qua SessionManager). Chờ nạp xong (>=0) mới áp vào.
     val camSettings: CameraSettingsViewModel = hiltViewModel()
     val savedFlash by camSettings.flashMode.collectAsState()
@@ -165,11 +190,13 @@ fun OcrCameraDialog(
                 .fillMaxSize()
                 .background(Color.Black)
         ) {
-            // CameraX preview
+            // CameraX preview — key(implMode): watchdog đổi mode thì tạo lại PreviewView, rebind qua
+            // LaunchedEffect(previewView, useUltrawide) bên trên.
+            key(implMode) {
             AndroidView(
                 factory = { ctx ->
                     PreviewView(ctx).also { pv ->
-                        pv.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                        pv.implementationMode = implMode
                         pv.scaleType = PreviewView.ScaleType.FILL_CENTER
                         previewView = pv
                     }
@@ -188,6 +215,7 @@ fun OcrCameraDialog(
                         }
                     }
             )
+            }  // end key(implMode)
 
             // Hướng dẫn ở trên
             Surface(

@@ -49,11 +49,17 @@ class OcrService @Inject constructor(
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
+    companion object {
+        // OCR dùng độ phân giải CỐ ĐỊNH (không theo cấu hình resize ảnh container) để đảm bảo
+        // nhận diện ổn định — chữ nhỏ trên số chì cần đủ nét.
+        private const val OCR_MAX_DIM = 1280
+    }
+
     /** Nhận bytes thô từ CameraX, trả về kết quả kèm timing chi tiết */
     suspend fun scanBytes(bytes: ByteArray, rotationDegrees: Int): OcrTimedResult =
         withContext(Dispatchers.IO) {
             val t0 = System.currentTimeMillis()
-            val resized = imageResizer.resizeBytes(bytes, rotationDegrees)
+            val resized = imageResizer.resizeBytes(bytes, rotationDegrees, OCR_MAX_DIM)
             val resizeMs = System.currentTimeMillis() - t0
 
             val t1 = System.currentTimeMillis()
@@ -66,7 +72,7 @@ class OcrService @Inject constructor(
 
     suspend fun scanImage(imageUri: Uri): OcrTimedResult = withContext(Dispatchers.IO) {
         val t0 = System.currentTimeMillis()
-        val resized = imageResizer.resizeToBytes(imageUri)
+        val resized = imageResizer.resizeToBytes(imageUri, OCR_MAX_DIM)
         val resizeMs = System.currentTimeMillis() - t0
 
         val t1 = System.currentTimeMillis()
@@ -102,7 +108,7 @@ class OcrService @Inject constructor(
      * trả kèm đường dẫn file đã lưu để caller gọi PhotoRepository.saveLocal().
      */
     suspend fun scanSeal(bytes: ByteArray, rotationDegrees: Int): SealScanResult = withContext(Dispatchers.IO) {
-        val resized = imageResizer.resizeBytes(bytes, rotationDegrees)
+        val resized = imageResizer.resizeBytes(bytes, rotationDegrees, OCR_MAX_DIM)
         val savedFile = imageResizer.writeJpegFile(resized)
         val base64 = Base64.getEncoder().encodeToString(resized)
 
@@ -133,15 +139,42 @@ class OcrService @Inject constructor(
             ""
         }
 
-        // Giống Xamarin: chọn dòng dài nhất có chứa số và không chứa "/" hoặc "."
-        val sealNo = parsedText.split("\n")
+        SealScanResult(extractSealNo(parsedText), savedFile.absolutePath)
+    }
+
+    /**
+     * Quét số seal bằng ML Kit Text Recognition (ON-DEVICE, offline, không gửi ảnh lên server).
+     * Dùng để so sánh độ chính xác (đặc biệt với chữ bị xoay/nghiêng) so với ocr.space.
+     * Ảnh cũng được lưu lại làm ảnh container (giống scanSeal).
+     */
+    suspend fun scanSealMlKit(bytes: ByteArray, rotationDegrees: Int): SealScanResult = withContext(Dispatchers.IO) {
+        val resized = imageResizer.resizeBytes(bytes, rotationDegrees, OCR_MAX_DIM)
+        val savedFile = imageResizer.writeJpegFile(resized)
+
+        // resizeBytes đã xoay ảnh đúng chiều rồi → truyền rotation 0 cho ML Kit
+        val bitmap = android.graphics.BitmapFactory.decodeByteArray(resized, 0, resized.size)
+            ?: return@withContext SealScanResult("", savedFile.absolutePath)
+        val image = com.google.mlkit.vision.common.InputImage.fromBitmap(bitmap, 0)
+        val recognizer = com.google.mlkit.vision.text.TextRecognition.getClient(
+            com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS
+        )
+        val text = try {
+            com.google.android.gms.tasks.Tasks.await(recognizer.process(image))
+        } catch (e: Exception) {
+            null
+        } finally {
+            runCatching { bitmap.recycle() }
+        }
+        SealScanResult(extractSealNo(text?.text ?: ""), savedFile.absolutePath)
+    }
+
+    // Giống Xamarin: chọn dòng dài nhất có chứa số và không chứa "/" hoặc "."
+    private fun extractSealNo(text: String): String =
+        text.split("\n")
             .filter { line -> line.any { it.isDigit() } && !line.contains("/") && !line.contains(".") }
             .maxByOrNull { it.length }
             ?.trim()
             ?: ""
-
-        SealScanResult(sealNo, savedFile.absolutePath)
-    }
 
     /**
      * Gửi 1 bản ảnh seal lên server OCR nội bộ (cùng project scan số container) để tập hợp

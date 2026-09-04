@@ -23,8 +23,8 @@ android {
         applicationId = "com.tc128.giamdinhnative"
         minSdk = 26
         targetSdk = 35
-        versionCode = 21
-        versionName = "1.3.8"
+        versionCode = 25
+        versionName = "1.4.3"
     }
 
     signingConfigs {
@@ -123,6 +123,9 @@ dependencies {
 
     // Accompanist Permissions
     implementation(libs.accompanist.permissions)
+
+    // ML Kit Text Recognition (on-device) — tùy chọn quét số seal offline
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 
     // WorkManager + Hilt integration
     implementation(libs.workmanager)

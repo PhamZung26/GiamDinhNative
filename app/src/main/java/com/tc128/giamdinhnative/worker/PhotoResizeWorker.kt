@@ -24,7 +24,8 @@ class PhotoResizeWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted params: WorkerParameters,
     private val photoDao: PhotoDao,
-    private val imageResizer: ImageResizer
+    private val imageResizer: ImageResizer,
+    private val sessionManager: com.tc128.giamdinhnative.session.SessionManager
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
@@ -41,7 +42,7 @@ class PhotoResizeWorker @AssistedInject constructor(
         // Rút cạn TẤT CẢ ảnh chờ resize theo từng lô (getPendingResize LIMIT 20) tới khi hết —
         // trước đây chỉ resize 1 lô 20 ảnh/lần chạy, phần còn lại phải chờ periodic 15'.
         while (true) {
-            val pending = photoDao.getPendingResize()
+            val pending = photoDao.getPendingResize(sessionManager.cachedMaxUploadCount)
             if (pending.isEmpty()) break
 
             Log.d(TAG, "Resizing ${pending.size} photos")

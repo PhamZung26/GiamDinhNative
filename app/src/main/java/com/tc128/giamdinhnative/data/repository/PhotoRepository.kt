@@ -59,14 +59,8 @@ class PhotoRepository @Inject constructor(
     suspend fun getByItemEor(itemEorId: Int): List<PhotoEntity> =
         photoDao.getByItemEor(itemEorId)
 
-    suspend fun getPendingResize(): List<PhotoEntity> =
-        photoDao.getPendingResize()
-
     suspend fun markResized(id: Long) =
         photoDao.markResized(id)
-
-    suspend fun getPendingUpload(): List<PhotoEntity> =
-        photoDao.getPendingUpload()
 
     suspend fun getAllPending(): List<PhotoEntity> =
         photoDao.getAllPending()

@@ -8,13 +8,19 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -58,6 +64,17 @@ fun LoginScreen(
 
     LaunchedEffect(uiState.isLoggedIn) {
         if (uiState.isLoggedIn) onLoginSuccess()
+    }
+
+    if (uiState.showServerDialog) {
+        ServerPickerDialog(
+            servers = uiState.serverList,
+            active = uiState.activeServer,
+            onSelect = viewModel::selectServer,
+            onAdd = viewModel::addServer,
+            onRemove = viewModel::removeServer,
+            onDismiss = viewModel::closeServerDialog
+        )
     }
 
     Box(
@@ -199,6 +216,19 @@ fun LoginScreen(
                             Text("Đăng nhập", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                         }
                     }
+
+                    // Nút tuỳ chỉnh máy chủ — hiện host đang chọn
+                    TextButton(
+                        onClick = viewModel::openServerDialog,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    ) {
+                        Icon(Icons.Default.Dns, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Máy chủ: ${serverHostLabel(uiState.activeServer)}",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
                 }
             }
 
@@ -217,4 +247,72 @@ fun LoginScreen(
             }
         }
     }
+}
+
+// Rút gọn URL thành host (bỏ scheme, dấu /) để hiển thị trên nút
+private fun serverHostLabel(url: String): String =
+    url.trim().removePrefix("https://").removePrefix("http://").trimEnd('/')
+
+@Composable
+private fun ServerPickerDialog(
+    servers: List<String>,
+    active: String,
+    onSelect: (String) -> Unit,
+    onAdd: (String) -> Unit,
+    onRemove: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var newUrl by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Chọn máy chủ") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                servers.forEach { url ->
+                    val selected = url == active
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+                            .clickable { onSelect(url) }
+                            .padding(horizontal = 8.dp, vertical = 10.dp)
+                    ) {
+                        Icon(
+                            if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                            null,
+                            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(serverHostLabel(url), modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        if (url != com.tc128.giamdinhnative.session.SessionManager.DEFAULT_SERVER_URL) {
+                            IconButton(onClick = { onRemove(url) }, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Default.Delete, "Xoá", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text("Thêm máy chủ mới", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = newUrl,
+                        onValueChange = { newUrl = it },
+                        placeholder = { Text("vd: tc128hp.hopto.org:444", style = MaterialTheme.typography.bodySmall) },
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = {
+                        if (newUrl.isNotBlank()) { onAdd(newUrl); newUrl = "" }
+                    }) {
+                        Icon(Icons.Default.Add, "Thêm", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Xong") } }
+    )
 }

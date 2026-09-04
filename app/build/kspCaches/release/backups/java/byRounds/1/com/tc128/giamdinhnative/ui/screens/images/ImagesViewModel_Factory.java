@@ -1,5 +1,6 @@
 package com.tc128.giamdinhnative.ui.screens.images;
 
+import android.content.Context;
 import com.tc128.giamdinhnative.data.repository.PhotoRepository;
 import dagger.internal.DaggerGenerated;
 import dagger.internal.Factory;
@@ -9,7 +10,7 @@ import javax.annotation.processing.Generated;
 import javax.inject.Provider;
 
 @ScopeMetadata
-@QualifierMetadata
+@QualifierMetadata("dagger.hilt.android.qualifiers.ApplicationContext")
 @DaggerGenerated
 @Generated(
     value = "dagger.internal.codegen.ComponentProcessor",
@@ -26,20 +27,25 @@ import javax.inject.Provider;
 public final class ImagesViewModel_Factory implements Factory<ImagesViewModel> {
   private final Provider<PhotoRepository> photoRepositoryProvider;
 
-  public ImagesViewModel_Factory(Provider<PhotoRepository> photoRepositoryProvider) {
+  private final Provider<Context> contextProvider;
+
+  public ImagesViewModel_Factory(Provider<PhotoRepository> photoRepositoryProvider,
+      Provider<Context> contextProvider) {
     this.photoRepositoryProvider = photoRepositoryProvider;
+    this.contextProvider = contextProvider;
   }
 
   @Override
   public ImagesViewModel get() {
-    return newInstance(photoRepositoryProvider.get());
+    return newInstance(photoRepositoryProvider.get(), contextProvider.get());
   }
 
-  public static ImagesViewModel_Factory create(Provider<PhotoRepository> photoRepositoryProvider) {
-    return new ImagesViewModel_Factory(photoRepositoryProvider);
+  public static ImagesViewModel_Factory create(Provider<PhotoRepository> photoRepositoryProvider,
+      Provider<Context> contextProvider) {
+    return new ImagesViewModel_Factory(photoRepositoryProvider, contextProvider);
   }
 
-  public static ImagesViewModel newInstance(PhotoRepository photoRepository) {
-    return new ImagesViewModel(photoRepository);
+  public static ImagesViewModel newInstance(PhotoRepository photoRepository, Context context) {
+    return new ImagesViewModel(photoRepository, context);
   }
 }

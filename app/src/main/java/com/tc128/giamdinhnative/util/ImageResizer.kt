@@ -16,13 +16,17 @@ import javax.inject.Singleton
 
 @Singleton
 class ImageResizer @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val sessionManager: com.tc128.giamdinhnative.session.SessionManager
 ) {
+    // Kích cỡ resize do người dùng cấu hình (mặc định 1280) — đọc đồng bộ từ cache
+    private fun cfgMaxDim(): Int = sessionManager.cachedResizeMaxDim
+
     /**
      * Resize ảnh từ content URI → ByteArray JPEG.
      * Dùng cho OCR upload.
      */
-    fun resizeToBytes(imageUri: Uri, maxDim: Int = 1280): ByteArray {
+    fun resizeToBytes(imageUri: Uri, maxDim: Int = cfgMaxDim()): ByteArray {
         val resolver = context.contentResolver
         val rotation = resolver.openInputStream(imageUri)?.use { readExifRotation(it) } ?: 0f
 
@@ -42,7 +46,7 @@ class ImageResizer @Inject constructor(
      * Dùng cho batch resize trước khi upload.
      * @return kích thước file sau resize (bytes)
      */
-    fun resizeFile(file: File, maxDim: Int = 1280): Long {
+    fun resizeFile(file: File, maxDim: Int = cfgMaxDim()): Long {
         val rotation = file.inputStream().use { readExifRotation(it) }
 
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -62,7 +66,7 @@ class ImageResizer @Inject constructor(
      * Resize bytes thô từ CameraX (không cần URI/File).
      * rotationDegrees từ ImageProxy.imageInfo.rotationDegrees.
      */
-    fun resizeBytes(bytes: ByteArray, rotationDegrees: Int, maxDim: Int = 1280): ByteArray {
+    fun resizeBytes(bytes: ByteArray, rotationDegrees: Int, maxDim: Int = cfgMaxDim()): ByteArray {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
 

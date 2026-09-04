@@ -8,6 +8,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.ResponseBody.Companion.toResponseBody
@@ -21,7 +22,11 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
 
-    private const val BASE_URL = "https://tc128hp.hopto.org/"
+    // baseUrl mặc định (Retrofit yêu cầu 1 giá trị). Host thật do interceptor rewrite theo server
+    // người dùng cấu hình (SessionManager.cachedServerUrl). DEFAULT_HOST = host của baseUrl này —
+    // chỉ rewrite request trỏ tới host này (giữ nguyên request OCR tới ocr.phamdung.uk / ocr.space).
+    private const val BASE_URL = SessionManager.DEFAULT_SERVER_URL
+    private const val DEFAULT_HOST = "tc128hp.hopto.org"
 
     @Provides
     @Singleton
@@ -53,7 +58,22 @@ object NetworkModule {
             })
             .addInterceptor { chain ->
                 val token = runBlocking { sessionManager.getToken() }
-                val request = chain.request().newBuilder()
+                var original = chain.request()
+
+                // Rewrite host sang server người dùng cấu hình (chỉ cho request tới DEFAULT_HOST —
+                // tức các API chính; request OCR tới host khác giữ nguyên).
+                if (original.url.host == DEFAULT_HOST) {
+                    sessionManager.cachedServerUrl.toHttpUrlOrNull()?.let { cfg ->
+                        val newUrl = original.url.newBuilder()
+                            .scheme(cfg.scheme)
+                            .host(cfg.host)
+                            .port(cfg.port)
+                            .build()
+                        original = original.newBuilder().url(newUrl).build()
+                    }
+                }
+
+                val request = original.newBuilder()
                     .apply { if (token != null) addHeader("Authorization", "Bearer $token") }
                     // Đánh dấu request từ app native — backend dùng header này để phân biệt
                     // với app Xamarin cũ (gọi cùng endpoint api/containerv2 nhưng không có header)
